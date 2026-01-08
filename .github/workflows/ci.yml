@@ -1,0 +1,68 @@
+name: Rust CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    name: ${{ matrix.os }} / ${{ matrix.rust }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable, beta]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install the requested Rust toolchain + components used by the workflow
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+
+      # Cache cargo registry/git and build artifacts to speed up CI
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.rust }}-cargo-
+
+      # Optional but great: much faster test runner
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Run tests (nextest)
+        run: cargo nextest run
+
+      # Enforce formatting
+      - name: Format (rustfmt)
+        run: cargo fmt --all -- --check
+
+      # Lint and fail the build on warnings
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # Security audit (run only once to reduce noise/time)
+      - name: Security audit (cargo-audit)
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.rust == 'stable' }}
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
