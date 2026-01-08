@@ -9,6 +9,8 @@ release:
     cargo build --release
 
 [group('GIT')]
+git-force:
+    git push -f
 git-fixup hash:
     git add --all && \
     git commit --fixup='{{ hash }}' && \
@@ -19,3 +21,4 @@ hello:
     wscat -c ws://localhost:3000/ws
 
 alias fixup := git-fixup
+alias yeet := git-force
