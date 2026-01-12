@@ -1,6 +1,5 @@
-use crate::protocol::ErrorEvent;
 use crate::{
-    protocol::{GatewayPayload, MessageCreateEvent, ReadyEvent},
+    protocol::{ErrorCode, ErrorEvent, GatewayPayload, MessageCreateEvent, ReadyEvent},
     state::AppState,
     types::{ChannelId, ConnectionId, UserId},
 };
@@ -137,11 +136,9 @@ pub fn dispatch_ready_to_connection(
 pub fn dispatch_error_to_connection(
     state: &Arc<AppState>,
     connection_id: &ConnectionId,
-    code: &str,
+    code: ErrorCode,
 ) {
-    let event = ErrorEvent {
-        code: code.to_string(),
-    };
+    let event = ErrorEvent { code };
     let payload = GatewayPayload::Dispatch {
         t: "ERROR".into(),
         d: serde_json::to_value(event).expect("error payload should serialize"),

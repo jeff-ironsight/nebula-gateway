@@ -7,7 +7,7 @@ use crate::{
     gateway::handler::{
         broadcast_message_to_channel, cleanup_connection, is_subscribed, subscribe_connection,
     },
-    protocol::GatewayPayload,
+    protocol::{ErrorCode, GatewayPayload},
     state::AppState,
     types::ConnectionId,
 };
@@ -40,9 +40,6 @@ pub async fn ws_handler(
 }
 
 async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Error> {
-    const ERROR_NOT_IDENTIFIED: &str = "NOT_IDENTIFIED";
-    const ERROR_NOT_SUBSCRIBED: &str = "NOT_SUBSCRIBED";
-
     let connection_id = ConnectionId::from(Uuid::new_v4());
     info!(?connection_id, "ws connected");
 
@@ -81,7 +78,7 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             dispatch_error_to_connection(
                                 &state,
                                 &connection_id,
-                                ERROR_NOT_IDENTIFIED,
+                                ErrorCode::NotIdentified,
                             );
                             debug!(
                                 ?connection_id,
@@ -100,7 +97,7 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             dispatch_error_to_connection(
                                 &state,
                                 &connection_id,
-                                ERROR_NOT_IDENTIFIED,
+                                ErrorCode::NotIdentified,
                             );
                             debug!(
                                 ?connection_id,
@@ -113,7 +110,7 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             dispatch_error_to_connection(
                                 &state,
                                 &connection_id,
-                                ERROR_NOT_SUBSCRIBED,
+                                ErrorCode::NotSubscribed,
                             );
                             debug!(
                                 ?connection_id,
@@ -164,7 +161,7 @@ mod tests {
         gateway::handler::{
             broadcast_message_to_channel, cleanup_connection, subscribe_connection,
         },
-        protocol::ReadyEvent,
+        protocol::{ErrorCode, ReadyEvent},
         state::AppState,
         types::{ChannelId, UserId},
     };
@@ -179,7 +176,7 @@ mod tests {
     use tokio_tungstenite::{connect_async, tungstenite};
     use uuid::Uuid;
 
-    const ERROR_NOT_IDENTIFIED: &str = "NOT_IDENTIFIED";
+    const ERROR_NOT_IDENTIFIED: ErrorCode = ErrorCode::NotIdentified;
 
     async fn identify_connection(
         socket: &mut tokio_tungstenite::WebSocketStream<
@@ -214,7 +211,7 @@ mod tests {
         socket: &mut tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
-        code: &str,
+        code: ErrorCode,
     ) {
         let message = timeout(Duration::from_secs(1), socket.next())
             .await

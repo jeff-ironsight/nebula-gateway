@@ -39,9 +39,16 @@ pub struct ReadyEvent {
     pub heartbeat_interval_ms: u64,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ErrorCode {
+    NotIdentified,
+    NotSubscribed,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ErrorEvent {
-    pub code: String,
+    pub code: ErrorCode,
 }
 
 #[cfg(test)]
@@ -81,6 +88,16 @@ mod tests {
             json,
             json!({"op":"Identify","d":{"user_id":"00000000-0000-0000-0000-000000000000"}})
         );
+    }
+
+    #[test]
+    fn error_event_serializes_with_code() {
+        let event = ErrorEvent {
+            code: ErrorCode::NotIdentified,
+        };
+
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json, json!({"code":"NOT_IDENTIFIED"}));
     }
 
     #[test]
