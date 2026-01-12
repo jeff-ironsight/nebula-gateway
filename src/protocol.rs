@@ -39,6 +39,11 @@ pub struct ReadyEvent {
     pub heartbeat_interval_ms: u64,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ErrorEvent {
+    pub code: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

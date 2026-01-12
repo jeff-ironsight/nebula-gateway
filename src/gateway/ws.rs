@@ -1,5 +1,6 @@
 use crate::gateway::handler::{
-    dispatch_hello_to_connection, dispatch_ready_to_connection, require_identified,
+    dispatch_error_to_connection, dispatch_hello_to_connection, dispatch_ready_to_connection,
+    require_identified,
 };
 use crate::state::Session;
 use crate::{
@@ -39,6 +40,8 @@ pub async fn ws_handler(
 }
 
 async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Error> {
+    const ERROR_NOT_IDENTIFIED: &str = "NOT_IDENTIFIED";
+
     let connection_id = ConnectionId::from(Uuid::new_v4());
     info!(?connection_id, "ws connected");
 
@@ -74,6 +77,16 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                     }
                     Ok(GatewayPayload::Subscribe { channel_id }) => {
                         let Some(_user_id) = require_identified(&state, &connection_id) else {
+                            dispatch_error_to_connection(
+                                &state,
+                                &connection_id,
+                                ERROR_NOT_IDENTIFIED,
+                            );
+                            debug!(
+                                ?connection_id,
+                                channel = %channel_id,
+                                "subscribe ignored; not identified"
+                            );
                             continue;
                         };
                         subscribe_connection(&state, channel_id, connection_id);
@@ -83,6 +96,16 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                         content,
                     }) => {
                         let Some(_user_id) = require_identified(&state, &connection_id) else {
+                            dispatch_error_to_connection(
+                                &state,
+                                &connection_id,
+                                ERROR_NOT_IDENTIFIED,
+                            );
+                            debug!(
+                                ?connection_id,
+                                channel = %channel_id,
+                                "message create ignored; not identified"
+                            );
                             continue;
                         };
                         if !is_subscribed(&state, connection_id, &channel_id) {
@@ -150,6 +173,8 @@ mod tests {
     use tokio_tungstenite::{connect_async, tungstenite};
     use uuid::Uuid;
 
+    const ERROR_NOT_IDENTIFIED: &str = "NOT_IDENTIFIED";
+
     async fn identify_connection(
         socket: &mut tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -176,6 +201,28 @@ mod tests {
                 assert_eq!(ready.heartbeat_interval_ms, 25_000);
             }
             other => panic!("expected READY dispatch, got {:?}", other),
+        }
+    }
+
+    async fn expect_error_dispatch(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        code: &str,
+    ) {
+        let message = timeout(Duration::from_secs(1), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let payload_text = message.into_text().unwrap();
+        let payload: GatewayPayload = serde_json::from_str(&payload_text).unwrap();
+        match payload {
+            GatewayPayload::Dispatch { t, d } => {
+                assert_eq!(t, "ERROR");
+                assert_eq!(d.get("code"), Some(&json!(code)));
+            }
+            other => panic!("expected ERROR dispatch, got {:?}", other),
         }
     }
 
@@ -327,6 +374,7 @@ mod tests {
             .await
             .unwrap();
 
+        expect_error_dispatch(&mut socket, ERROR_NOT_IDENTIFIED).await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(state.channel_members.get(&channel_id).is_none());
         assert!(state.connection_channels.is_empty());

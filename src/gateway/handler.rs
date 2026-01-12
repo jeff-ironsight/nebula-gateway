@@ -1,3 +1,4 @@
+use crate::protocol::ErrorEvent;
 use crate::{
     protocol::{GatewayPayload, MessageCreateEvent, ReadyEvent},
     state::AppState,
@@ -129,6 +130,31 @@ pub fn dispatch_ready_to_connection(
         debug!(
             ?connection_id,
             "cannot send ready payload to missing connection"
+        );
+    }
+}
+
+pub fn dispatch_error_to_connection(
+    state: &Arc<AppState>,
+    connection_id: &ConnectionId,
+    code: &str,
+) {
+    let event = ErrorEvent {
+        code: code.to_string(),
+    };
+    let payload = GatewayPayload::Dispatch {
+        t: "ERROR".into(),
+        d: serde_json::to_value(event).expect("error payload should serialize"),
+    };
+
+    if let Some(tx) = state.connections.get(connection_id) {
+        if tx.send(text_msg(&payload)).is_err() {
+            warn!(?connection_id, "failed to send error payload");
+        }
+    } else {
+        debug!(
+            ?connection_id,
+            "cannot send error payload to missing connection"
         );
     }
 }
