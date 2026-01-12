@@ -1,7 +1,7 @@
 use crate::{
-    protocol::{GatewayPayload, MessageCreateEvent},
+    protocol::{GatewayPayload, MessageCreateEvent, ReadyEvent},
     state::AppState,
-    types::{ChannelId, ConnectionId},
+    types::{ChannelId, ConnectionId, UserId},
 };
 use axum::extract::ws::Message;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ pub fn broadcast_message_to_channel(
     let member_ids: Vec<ConnectionId> = members.iter().map(|id| *id).collect();
     drop(members);
 
-    let message = MessageCreateEvent {
+    let event = MessageCreateEvent {
         id: Ulid::new(),
         channel_id: channel_id.clone(),
         author_connection_id: *author_connection_id,
@@ -54,9 +54,8 @@ pub fn broadcast_message_to_channel(
     };
     let payload = GatewayPayload::Dispatch {
         t: "MESSAGE_CREATE".into(),
-        d: serde_json::to_value(message).expect("message payload should serialize"),
+        d: serde_json::to_value(event).expect("message payload should serialize"),
     };
-    let message = Message::Text(serde_json::to_string(&payload).unwrap().into());
 
     #[cfg(test)]
     state.dispatch_counter.fetch_add(1, Ordering::Relaxed);
@@ -66,7 +65,7 @@ pub fn broadcast_message_to_channel(
     for member_id in member_ids {
         match state.connections.get(&member_id) {
             Some(tx) => {
-                if tx.send(message.clone()).is_err() {
+                if tx.send(text_msg(&payload).clone()).is_err() {
                     warn!(
                         ?member_id,
                         channel = %channel_id,
@@ -91,8 +90,52 @@ pub fn broadcast_message_to_channel(
     }
 }
 
+pub fn dispatch_hello_to_connection(state: &Arc<AppState>, connection_id: &ConnectionId) {
+    let payload = GatewayPayload::Hello {
+        heartbeat_interval_ms: 25_000,
+    };
+    if let Some(tx) = state.connections.get(connection_id) {
+        if tx.send(text_msg(&payload)).is_err() {
+            warn!(?connection_id, "failed to send hello payload");
+        }
+    } else {
+        debug!(
+            ?connection_id,
+            "cannot send hello payload to missing connection"
+        );
+    }
+}
+
+pub fn dispatch_ready_to_connection(
+    state: &Arc<AppState>,
+    connection_id: &ConnectionId,
+    user_id: &UserId,
+) {
+    let event = ReadyEvent {
+        connection_id: *connection_id,
+        user_id: *user_id,
+        heartbeat_interval_ms: 25_000,
+    };
+    let payload = GatewayPayload::Dispatch {
+        t: "READY".into(),
+        d: serde_json::to_value(event).expect("ready payload should serialize"),
+    };
+
+    if let Some(tx) = state.connections.get(connection_id) {
+        if tx.send(text_msg(&payload)).is_err() {
+            warn!(?connection_id, "failed to send ready payload");
+        }
+    } else {
+        debug!(
+            ?connection_id,
+            "cannot send ready payload to missing connection"
+        );
+    }
+}
+
 pub fn cleanup_connection(state: &Arc<AppState>, connection_id: &ConnectionId) {
     state.connections.remove(connection_id);
+    state.sessions.remove(connection_id);
     if let Some((_, channels)) = state.connection_channels.remove(connection_id) {
         for channel_id in channels.into_iter() {
             remove_channel_membership(state, &channel_id, connection_id);
@@ -140,4 +183,12 @@ fn remove_connection_channel(
             state.connection_channels.remove(connection_id);
         }
     }
+}
+
+pub fn require_identified(state: &Arc<AppState>, connection_id: &ConnectionId) -> Option<UserId> {
+    state.sessions.get(connection_id).map(|s| s.user_id)
+}
+
+fn text_msg<T: serde::Serialize>(value: &T) -> Message {
+    Message::Text(serde_json::to_string(value).unwrap().into())
 }

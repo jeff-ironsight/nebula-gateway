@@ -1,3 +1,7 @@
+use crate::gateway::handler::{
+    dispatch_hello_to_connection, dispatch_ready_to_connection, require_identified,
+};
+use crate::state::Session;
 use crate::{
     gateway::handler::{
         broadcast_message_to_channel, cleanup_connection, is_subscribed, subscribe_connection,
@@ -53,15 +57,8 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
         }
     });
 
-    // Send HELLO through the same outbound queue
-    let hello = GatewayPayload::Hello {
-        heartbeat_interval_ms: 25_000,
-    };
-    if outbound_tx.send(text_msg(&hello)).is_err() {
-        warn!(?connection_id, "failed to enqueue hello payload");
-    }
+    dispatch_hello_to_connection(&state, &connection_id);
 
-    // Reader loop
     let mut reader_result: Result<(), Error> = Ok(());
 
     while let Some(result) = ws_receiver.next().await {
@@ -70,13 +67,24 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                 debug!(?connection_id, "ws recv: {}", text.as_str());
 
                 match serde_json::from_str::<GatewayPayload>(text.as_str()) {
+                    Ok(GatewayPayload::Identify { user_id }) => {
+                        state.sessions.insert(connection_id, Session { user_id });
+                        debug!(?connection_id, ?user_id, "connection identified");
+                        dispatch_ready_to_connection(&state, &connection_id, &user_id);
+                    }
                     Ok(GatewayPayload::Subscribe { channel_id }) => {
+                        let Some(_user_id) = require_identified(&state, &connection_id) else {
+                            continue;
+                        };
                         subscribe_connection(&state, channel_id, connection_id);
                     }
                     Ok(GatewayPayload::MessageCreate {
                         channel_id,
                         content,
                     }) => {
+                        let Some(_user_id) = require_identified(&state, &connection_id) else {
+                            continue;
+                        };
                         if !is_subscribed(&state, connection_id, &channel_id) {
                             debug!(
                                 ?connection_id,
@@ -119,10 +127,6 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
     reader_result
 }
 
-fn text_msg<T: serde::Serialize>(value: &T) -> Message {
-    Message::Text(serde_json::to_string(value).unwrap().into())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,8 +135,9 @@ mod tests {
         gateway::handler::{
             broadcast_message_to_channel, cleanup_connection, subscribe_connection,
         },
+        protocol::ReadyEvent,
         state::AppState,
-        types::ChannelId,
+        types::{ChannelId, UserId},
     };
     use futures_util::{SinkExt, StreamExt};
     use serde_json::json;
@@ -144,6 +149,35 @@ mod tests {
     };
     use tokio_tungstenite::{connect_async, tungstenite};
     use uuid::Uuid;
+
+    async fn identify_connection(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        user_id: Uuid,
+    ) {
+        let identify = serde_json::to_string(&GatewayPayload::Identify {
+            user_id: UserId::from(user_id),
+        })
+        .unwrap();
+        socket
+            .send(tungstenite::Message::Text(identify.into()))
+            .await
+            .unwrap();
+
+        let message = socket.next().await.unwrap().unwrap();
+        let payload_text = message.into_text().unwrap();
+        let payload: GatewayPayload = serde_json::from_str(&payload_text).unwrap();
+        match payload {
+            GatewayPayload::Dispatch { t, d } => {
+                assert_eq!(t, "READY");
+                let ready: ReadyEvent = serde_json::from_value(d).unwrap();
+                assert_eq!(ready.user_id, UserId::from(user_id));
+                assert_eq!(ready.heartbeat_interval_ms, 25_000);
+            }
+            other => panic!("expected READY dispatch, got {:?}", other),
+        }
+    }
 
     #[test]
     fn subscribe_connection_is_idempotent() {
@@ -270,6 +304,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subscribe_is_ignored_when_not_identified() {
+        let state = Arc::new(AppState::new());
+        let router = app::build_router(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        let url = format!("ws://{}/ws", addr);
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+
+        let channel_id = ChannelId::from("general");
+        let subscribe = serde_json::to_string(&GatewayPayload::Subscribe {
+            channel_id: channel_id.clone(),
+        })
+        .unwrap();
+        socket
+            .send(tungstenite::Message::Text(subscribe.into()))
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(state.channel_members.get(&channel_id).is_none());
+        assert!(state.connection_channels.is_empty());
+
+        socket.close(None).await.unwrap();
+        timeout(Duration::from_secs(1), async {
+            while !state.connections.is_empty() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn message_create_is_ignored_when_not_identified() {
+        let state = Arc::new(AppState::new());
+        let router = app::build_router(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        let url = format!("ws://{}/ws", addr);
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+
+        let channel_id = ChannelId::from("general");
+        let message = serde_json::to_string(&GatewayPayload::MessageCreate {
+            channel_id: channel_id.clone(),
+            content: "hello world".into(),
+        })
+        .unwrap();
+        socket
+            .send(tungstenite::Message::Text(message.into()))
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(state.dispatch_counter.load(Ordering::Relaxed), 0);
+        assert!(state.channel_members.get(&channel_id).is_none());
+
+        socket.close(None).await.unwrap();
+        timeout(Duration::from_secs(1), async {
+            while !state.connections.is_empty() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn message_create_broadcasts_to_channel_subscribers() {
         let state = Arc::new(AppState::new());
         let router = app::build_router(state.clone());
@@ -285,6 +400,8 @@ mod tests {
 
         alice.next().await.unwrap().unwrap();
         bob.next().await.unwrap().unwrap();
+        identify_connection(&mut alice, Uuid::new_v4()).await;
+        identify_connection(&mut bob, Uuid::new_v4()).await;
 
         let channel_id = ChannelId::from("general");
         let subscribe = serde_json::to_string(&GatewayPayload::Subscribe {
@@ -375,6 +492,8 @@ mod tests {
 
         alice.next().await.unwrap().unwrap();
         bob.next().await.unwrap().unwrap();
+        identify_connection(&mut alice, Uuid::new_v4()).await;
+        identify_connection(&mut bob, Uuid::new_v4()).await;
 
         let channel_id = ChannelId::from("general");
         let subscribe = serde_json::to_string(&GatewayPayload::Subscribe {
