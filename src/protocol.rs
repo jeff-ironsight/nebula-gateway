@@ -28,7 +28,7 @@ pub enum GatewayPayload {
 pub struct MessageCreateEvent {
     pub id: Ulid,
     pub channel_id: ChannelId,
-    pub author_connection_id: ConnectionId,
+    pub author_user_id: UserId,
     pub content: String,
 }
 
@@ -106,7 +106,7 @@ mod tests {
         let message = MessageCreateEvent {
             id: Ulid::new(),
             channel_id: ChannelId::from("general"),
-            author_connection_id: ConnectionId::from(uuid::Uuid::nil()),
+            author_user_id: UserId::from(uuid::Uuid::nil()),
             content: "hello".into(),
         };
 
@@ -114,7 +114,7 @@ mod tests {
         let parsed: MessageCreateEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.id, message.id);
         assert_eq!(parsed.channel_id, message.channel_id);
-        assert_eq!(parsed.author_connection_id, message.author_connection_id);
+        assert_eq!(parsed.author_user_id, message.author_user_id);
         assert_eq!(parsed.content, message.content);
     }
 

@@ -35,7 +35,7 @@ pub fn subscribe_connection(
 pub fn broadcast_message_to_channel(
     state: &Arc<AppState>,
     channel_id: &ChannelId,
-    author_connection_id: &ConnectionId,
+    author_user_id: &UserId,
     content: &str,
 ) {
     let Some(members) = state.channel_members.get(channel_id) else {
@@ -49,13 +49,14 @@ pub fn broadcast_message_to_channel(
     let event = MessageCreateEvent {
         id: Ulid::new(),
         channel_id: channel_id.clone(),
-        author_connection_id: *author_connection_id,
+        author_user_id: *author_user_id,
         content: content.to_string(),
     };
     let payload = GatewayPayload::Dispatch {
         t: "MESSAGE_CREATE".into(),
         d: serde_json::to_value(event).expect("message payload should serialize"),
     };
+    debug!("sending message to channel {}", channel_id);
 
     #[cfg(test)]
     state.dispatch_counter.fetch_add(1, Ordering::Relaxed);

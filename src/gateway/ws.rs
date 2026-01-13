@@ -130,7 +130,7 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             );
                             continue;
                         }
-                        broadcast_message_to_channel(&state, &channel_id, &connection_id, &content);
+                        broadcast_message_to_channel(&state, &channel_id, &_user_id, &content);
                     }
                     Ok(_other) => {
                         // Ignore unhandled payloads for now
@@ -261,6 +261,7 @@ mod tests {
         let channel_id = ChannelId::from("general");
         let stale_connection = ConnectionId::from(Uuid::new_v4());
         let active_connection = ConnectionId::from(Uuid::new_v4());
+        let active_user_id = UserId::from(Uuid::new_v4());
 
         {
             let members = state.channel_members.entry(channel_id.clone()).or_default();
@@ -281,7 +282,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         state.connections.insert(active_connection, tx);
 
-        broadcast_message_to_channel(&state, &channel_id, &active_connection, "hello");
+        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "hello");
 
         let message = rx.recv().await.unwrap();
         match message {
@@ -515,11 +516,7 @@ mod tests {
                 assert_eq!(d.get("channel_id"), Some(&json!(channel_id)));
                 assert_eq!(d.get("content"), Some(&json!("hello world")));
                 assert!(d.get("id").and_then(|value| value.as_str()).is_some());
-                assert!(
-                    d.get("author_connection_id")
-                        .and_then(|value| value.as_str())
-                        .is_some()
-                );
+                assert_eq!(d.get("author_user_id"), Some(&json!(alice_user_id)));
                 assert!(d.get("timestamp").is_none());
             }
             other => panic!("expected dispatch payload, got {:?}", other),
