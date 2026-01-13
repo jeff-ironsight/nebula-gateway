@@ -68,7 +68,18 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                 debug!(?connection_id, "ws recv: {}", text.as_str());
 
                 match serde_json::from_str::<GatewayPayload>(text.as_str()) {
-                    Ok(GatewayPayload::Identify { user_id }) => {
+                    Ok(GatewayPayload::Identify { token }) => {
+                        let Some(user_id) =
+                            state.auth_tokens.get(&token).map(|entry| *entry.value())
+                        else {
+                            dispatch_error_to_connection(
+                                &state,
+                                &connection_id,
+                                ErrorCode::InvalidToken,
+                            );
+                            debug!(?connection_id, "identify failed; invalid token");
+                            continue;
+                        };
                         state.sessions.insert(connection_id, Session { user_id });
                         debug!(?connection_id, ?user_id, "connection identified");
                         dispatch_ready_to_connection(&state, &connection_id, &user_id);
@@ -163,7 +174,7 @@ mod tests {
         },
         protocol::{ErrorCode, ReadyEvent},
         state::AppState,
-        types::{ChannelId, UserId},
+        types::{ChannelId, Token, UserId},
     };
     use futures_util::{SinkExt, StreamExt};
     use serde_json::json;
@@ -182,12 +193,10 @@ mod tests {
         socket: &mut tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
-        user_id: Uuid,
+        token: Token,
+        user_id: UserId,
     ) {
-        let identify = serde_json::to_string(&GatewayPayload::Identify {
-            user_id: UserId::from(user_id),
-        })
-        .unwrap();
+        let identify = serde_json::to_string(&GatewayPayload::Identify { token }).unwrap();
         socket
             .send(tungstenite::Message::Text(identify.into()))
             .await
@@ -200,7 +209,7 @@ mod tests {
             GatewayPayload::Dispatch { t, d } => {
                 assert_eq!(t, "READY");
                 let ready: ReadyEvent = serde_json::from_value(d).unwrap();
-                assert_eq!(ready.user_id, UserId::from(user_id));
+                assert_eq!(ready.user_id, user_id);
                 assert_eq!(ready.heartbeat_interval_ms, 25_000);
             }
             other => panic!("expected READY dispatch, got {:?}", other),
@@ -451,8 +460,14 @@ mod tests {
 
         alice.next().await.unwrap().unwrap();
         bob.next().await.unwrap().unwrap();
-        identify_connection(&mut alice, Uuid::new_v4()).await;
-        identify_connection(&mut bob, Uuid::new_v4()).await;
+        let alice_user_id = UserId::from(Uuid::new_v4());
+        let bob_user_id = UserId::from(Uuid::new_v4());
+        let alice_token = Token::new();
+        let bob_token = Token::new();
+        state.auth_tokens.insert(alice_token.clone(), alice_user_id);
+        state.auth_tokens.insert(bob_token.clone(), bob_user_id);
+        identify_connection(&mut alice, alice_token, alice_user_id).await;
+        identify_connection(&mut bob, bob_token, bob_user_id).await;
 
         let channel_id = ChannelId::from("general");
         let subscribe = serde_json::to_string(&GatewayPayload::Subscribe {
@@ -543,8 +558,14 @@ mod tests {
 
         alice.next().await.unwrap().unwrap();
         bob.next().await.unwrap().unwrap();
-        identify_connection(&mut alice, Uuid::new_v4()).await;
-        identify_connection(&mut bob, Uuid::new_v4()).await;
+        let alice_user_id = UserId::from(Uuid::new_v4());
+        let bob_user_id = UserId::from(Uuid::new_v4());
+        let alice_token = Token::new();
+        let bob_token = Token::new();
+        state.auth_tokens.insert(alice_token.clone(), alice_user_id);
+        state.auth_tokens.insert(bob_token.clone(), bob_user_id);
+        identify_connection(&mut alice, alice_token, alice_user_id).await;
+        identify_connection(&mut bob, bob_token, bob_user_id).await;
 
         let channel_id = ChannelId::from("general");
         let subscribe = serde_json::to_string(&GatewayPayload::Subscribe {

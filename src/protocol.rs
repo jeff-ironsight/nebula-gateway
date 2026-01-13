@@ -1,4 +1,4 @@
-use crate::types::{ChannelId, ConnectionId, UserId};
+use crate::types::{ChannelId, ConnectionId, Token, UserId};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -9,7 +9,7 @@ pub enum GatewayPayload {
         heartbeat_interval_ms: u64,
     },
     Identify {
-        user_id: UserId,
+        token: Token,
     },
     Subscribe {
         channel_id: ChannelId,
@@ -44,6 +44,7 @@ pub struct ReadyEvent {
 pub enum ErrorCode {
     NotIdentified,
     NotSubscribed,
+    InvalidToken,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -80,13 +81,13 @@ mod tests {
     #[test]
     fn identify_payload_serializes_with_ids() {
         let payload = GatewayPayload::Identify {
-            user_id: UserId(uuid::Uuid::nil()),
+            token: Token(uuid::Uuid::nil().to_string()),
         };
 
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(
             json,
-            json!({"op":"Identify","d":{"user_id":"00000000-0000-0000-0000-000000000000"}})
+            json!({"op":"Identify","d":{"token":"00000000-0000-0000-0000-000000000000"}})
         );
     }
 
