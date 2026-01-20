@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "0.8.8", features = ["ws"] }
+chrono = "0.4.43"
 config = "0.15.19"
 dashmap = "6.1.0"
 futures-util = "0.3.31"

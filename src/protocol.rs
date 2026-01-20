@@ -30,6 +30,7 @@ pub struct MessageCreateEvent {
     pub channel_id: ChannelId,
     pub author_user_id: UserId,
     pub content: String,
+    pub timestamp: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -55,6 +56,7 @@ pub struct ErrorEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use serde_json::json;
 
     #[test]
@@ -108,6 +110,7 @@ mod tests {
             channel_id: ChannelId::from("general"),
             author_user_id: UserId::from(uuid::Uuid::nil()),
             content: "hello".into(),
+            timestamp: Utc::now().to_rfc3339(),
         };
 
         let json = serde_json::to_string(&message).unwrap();

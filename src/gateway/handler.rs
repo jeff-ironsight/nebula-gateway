@@ -4,6 +4,7 @@ use crate::{
     types::{ChannelId, ConnectionId, UserId},
 };
 use axum::extract::ws::Message;
+use chrono::Utc;
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
@@ -51,6 +52,7 @@ pub fn broadcast_message_to_channel(
         channel_id: channel_id.clone(),
         author_user_id: *author_user_id,
         content: content.to_string(),
+        timestamp: Utc::now().to_rfc3339(),
     };
     let payload = GatewayPayload::Dispatch {
         t: "MESSAGE_CREATE".into(),

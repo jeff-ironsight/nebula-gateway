@@ -517,7 +517,11 @@ mod tests {
                 assert_eq!(d.get("content"), Some(&json!("hello world")));
                 assert!(d.get("id").and_then(|value| value.as_str()).is_some());
                 assert_eq!(d.get("author_user_id"), Some(&json!(alice_user_id)));
-                assert!(d.get("timestamp").is_none());
+                assert!(
+                    d.get("timestamp")
+                        .and_then(|value| value.as_str())
+                        .is_some()
+                );
             }
             other => panic!("expected dispatch payload, got {:?}", other),
         }
