@@ -17,16 +17,19 @@ mod tests {
         body::to_bytes,
         http::{Request, StatusCode},
     };
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use serde_json::Value;
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use crate::{state::test_db, types::Token};
+    use crate::{
+        state::{test_auth_secret, test_db},
+        types::Token,
+    };
 
     #[tokio::test]
     async fn non_route_returns_not_found() {
-        let router = build_router(Arc::new(AppState::new(test_db())));
-
+        let router = build_router(Arc::new(AppState::new(test_db().await, test_auth_secret())));
         let request = Request::builder()
             .method("GET")
             .uri("/does-not-exist")
@@ -39,7 +42,7 @@ mod tests {
 
     #[tokio::test]
     async fn login_creates_token_and_persists_state() {
-        let state = Arc::new(AppState::new(test_db()));
+        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
         let router = build_router(state.clone());
 
         let request = Request::builder()
@@ -62,16 +65,13 @@ mod tests {
             .and_then(|value| value.as_str())
             .expect("user_id missing");
 
-        let token_uuid = Uuid::parse_str(token).expect("token uuid");
+        let token_bytes = URL_SAFE_NO_PAD.decode(token).expect("token base64url");
+        assert_eq!(token_bytes.len(), 32);
         let user_uuid = Uuid::parse_str(user_id).expect("user_id uuid");
-        assert!(
-            state
-                .auth_tokens
-                .contains_key(&Token(token_uuid.to_string()))
-        );
+        assert!(state.auth_tokens.contains_key(&Token(token.to_string())));
         let stored_user_id = state
             .auth_tokens
-            .get(&Token(token_uuid.to_string()))
+            .get(&Token(token.to_string()))
             .map(|entry| entry.value().0)
             .expect("token stored");
         assert_eq!(stored_user_id, user_uuid);

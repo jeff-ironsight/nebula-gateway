@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = Settings::load().expect("failed to load configuration");
 
     let db = PgPool::connect(&settings.server.database_url).await?;
-    let state = Arc::new(AppState::new(db));
+    let state = Arc::new(AppState::new(db, settings.auth.token_secret.into_bytes()));
 
     let app = app::build_router(state);
 

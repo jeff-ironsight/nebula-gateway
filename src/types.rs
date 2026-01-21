@@ -1,4 +1,8 @@
 use axum::extract::ws::Message;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use hmac::{Hmac, Mac};
+use rand::TryRngCore;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::sync::Arc;
@@ -77,6 +81,16 @@ pub struct Token(pub String);
 
 impl Token {
     pub fn new() -> Self {
-        Self(Uuid::new_v4().to_string())
+        let mut bytes = [0u8; 32];
+        let mut rng = OsRng;
+        rng.try_fill_bytes(&mut bytes)
+            .expect("failed to generate token bytes");
+        Self(URL_SAFE_NO_PAD.encode(bytes))
     }
+}
+
+pub fn token_hmac(secret: &[u8], token: &Token) -> Vec<u8> {
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret).expect("invalid HMAC secret");
+    mac.update(token.0.as_bytes());
+    mac.finalize().into_bytes().to_vec()
 }

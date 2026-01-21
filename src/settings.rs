@@ -4,12 +4,18 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, Clone)]
 pub struct Settings {
     pub server: ServerSettings,
+    pub auth: AuthSettings,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ServerSettings {
     pub bind_addr: String,
     pub database_url: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct AuthSettings {
+    pub token_secret: String,
 }
 
 impl Settings {

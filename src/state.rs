@@ -2,7 +2,17 @@ use crate::types::{ChannelId, ConnectionId, OutboundTx, Token, UserId};
 use dashmap::{DashMap, DashSet};
 use sqlx::PgPool;
 #[cfg(test)]
+use sqlx::postgres::PgPoolOptions;
+#[cfg(test)]
 use std::sync::atomic::AtomicUsize;
+#[cfg(test)]
+use std::time::Duration;
+#[cfg(test)]
+use testcontainers_modules::postgres::Postgres;
+#[cfg(test)]
+use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
+#[cfg(test)]
+use tokio::sync::OnceCell;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Session {
@@ -12,6 +22,7 @@ pub struct Session {
 
 pub struct AppState {
     pub db: PgPool,
+    pub auth_secret: Vec<u8>,
     pub connections: DashMap<ConnectionId, OutboundTx>,
     pub auth_tokens: DashMap<Token, UserId>,
     pub sessions: DashMap<ConnectionId, Session>,
@@ -23,9 +34,10 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(db: PgPool) -> Self {
+    pub fn new(db: PgPool, auth_secret: Vec<u8>) -> Self {
         Self {
             db,
+            auth_secret,
             connections: DashMap::new(),
             auth_tokens: DashMap::new(),
             sessions: DashMap::new(),
@@ -39,9 +51,49 @@ impl AppState {
 }
 
 #[cfg(test)]
-pub const TEST_DATABASE_URL: &str = "postgres://root:rootpass@localhost:5432/nebuladb";
+struct TestDb {
+    url: String,
+    _container: ContainerAsync<Postgres>,
+}
 
 #[cfg(test)]
-pub fn test_db() -> PgPool {
-    PgPool::connect_lazy(TEST_DATABASE_URL).expect("failed to init Postgres pool")
+async fn test_db_container() -> &'static TestDb {
+    static DB: OnceCell<TestDb> = OnceCell::const_new();
+
+    DB.get_or_init(|| async {
+        let container = Postgres::default()
+            .start()
+            .await
+            .expect("start postgres container");
+        let port = container
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("resolve postgres port");
+        let url = format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres");
+        TestDb {
+            url,
+            _container: container,
+        }
+    })
+    .await
+}
+
+#[cfg(test)]
+pub async fn test_db() -> PgPool {
+    let db = test_db_container().await;
+    let pool = PgPoolOptions::new()
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&db.url)
+        .await
+        .expect("connect test database");
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .expect("run test migrations");
+    pool
+}
+
+#[cfg(test)]
+pub fn test_auth_secret() -> Vec<u8> {
+    "test-secret".as_bytes().to_vec()
 }

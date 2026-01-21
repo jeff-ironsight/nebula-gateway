@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ ubuntu-latest ]
         rust: [stable, beta]
 
     steps:
@@ -42,7 +42,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.rust }}-cargo-
 
-      # Optional but great: much faster test runner
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 

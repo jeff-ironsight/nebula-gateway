@@ -175,7 +175,7 @@ mod tests {
             broadcast_message_to_channel, cleanup_connection, subscribe_connection,
         },
         protocol::{ErrorCode, ReadyEvent},
-        state::{AppState, test_db},
+        state::{AppState, test_auth_secret, test_db},
         types::{ChannelId, Token, UserId},
     };
     use axum::serve;
@@ -239,7 +239,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_connection_is_idempotent() {
-        let state = Arc::new(AppState::new(test_db()));
+        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
         let channel_id = ChannelId::from("general");
         let connection_id = ConnectionId::from(Uuid::new_v4());
 
@@ -256,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn broadcast_removes_stale_members() {
-        let state = Arc::new(AppState::new(test_db()));
+        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
         let channel_id = ChannelId::from("general");
         let stale_connection = ConnectionId::from(Uuid::new_v4());
         let active_connection = ConnectionId::from(Uuid::new_v4());
@@ -306,7 +306,7 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_connection_removes_all_channels() {
-        let state = Arc::new(AppState::new(test_db()));
+        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
         let connection_id = ConnectionId::from(Uuid::new_v4());
         let (tx, _rx) = mpsc::unbounded_channel();
         state.connections.insert(connection_id, tx);
@@ -328,11 +328,11 @@ mod tests {
 
     #[tokio::test]
     async fn hello_payload_is_sent_on_connect() {
-        let state = Arc::new(AppState::new(test_db()));
+        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
+        let server = spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
 
@@ -364,7 +364,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_is_ignored_when_not_identified() {
-        let state = Arc::new(AppState::new(test_db()));
+        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -405,7 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn message_create_is_ignored_when_not_identified() {
-        let state = Arc::new(AppState::new(test_db()));
+        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -446,11 +446,11 @@ mod tests {
 
     #[tokio::test]
     async fn message_create_broadcasts_to_channel_subscribers() {
-        let state = Arc::new(AppState::new(test_db()));
+        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
+        let server = spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
 
@@ -544,7 +544,7 @@ mod tests {
 
     #[tokio::test]
     async fn message_create_is_ignored_when_not_subscribed() {
-        let state = Arc::new(AppState::new(test_db()));
+        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
