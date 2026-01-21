@@ -1,5 +1,6 @@
 use crate::types::{ChannelId, ConnectionId, OutboundTx, Token, UserId};
 use dashmap::{DashMap, DashSet};
+use sqlx::PgPool;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 
@@ -10,6 +11,7 @@ pub struct Session {
 }
 
 pub struct AppState {
+    pub db: PgPool,
     pub connections: DashMap<ConnectionId, OutboundTx>,
     pub auth_tokens: DashMap<Token, UserId>,
     pub sessions: DashMap<ConnectionId, Session>,
@@ -21,8 +23,9 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(db: PgPool) -> Self {
         Self {
+            db,
             connections: DashMap::new(),
             auth_tokens: DashMap::new(),
             sessions: DashMap::new(),
@@ -33,4 +36,12 @@ impl AppState {
             dispatch_counter: AtomicUsize::new(0),
         }
     }
+}
+
+#[cfg(test)]
+pub const TEST_DATABASE_URL: &str = "postgres://root:rootpass@localhost:5432/nebuladb";
+
+#[cfg(test)]
+pub fn test_db() -> PgPool {
+    PgPool::connect_lazy(TEST_DATABASE_URL).expect("failed to init Postgres pool")
 }

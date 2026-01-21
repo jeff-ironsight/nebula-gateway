@@ -20,9 +20,11 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
+use serde_json::from_str;
 use std::sync::Arc;
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::{
-    sync::mpsc,
+    spawn,
     time::{Duration, timeout},
 };
 use tracing::{debug, info, warn};
@@ -44,13 +46,13 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
     info!(?connection_id, "ws connected");
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<Message>();
+    let (outbound_tx, mut outbound_rx) = unbounded_channel::<Message>();
 
     // Store sender so other tasks can send to this connection
     state.connections.insert(connection_id, outbound_tx.clone());
 
     // Writer task: drain outbound_rx -> websocket
-    let mut send_task = tokio::spawn(async move {
+    let mut send_task = spawn(async move {
         while let Some(message) = outbound_rx.recv().await {
             if ws_sender.send(message).await.is_err() {
                 break;
@@ -67,7 +69,7 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
             Ok(Message::Text(text)) => {
                 debug!(?connection_id, "ws recv: {}", text.as_str());
 
-                match serde_json::from_str::<GatewayPayload>(text.as_str()) {
+                match from_str::<GatewayPayload>(text.as_str()) {
                     Ok(GatewayPayload::Identify { token }) => {
                         let Some(user_id) =
                             state.auth_tokens.get(&token).map(|entry| *entry.value())
@@ -173,30 +175,29 @@ mod tests {
             broadcast_message_to_channel, cleanup_connection, subscribe_connection,
         },
         protocol::{ErrorCode, ReadyEvent},
-        state::AppState,
+        state::{AppState, test_db},
         types::{ChannelId, Token, UserId},
     };
+    use axum::serve;
     use futures_util::{SinkExt, StreamExt};
-    use serde_json::json;
+    use serde_json::{from_value, json, to_string};
     use std::sync::atomic::Ordering;
-    use tokio::net::TcpListener;
+    use tokio::net::{TcpListener, TcpStream};
     use tokio::{
         sync::mpsc,
         time::{Duration, sleep, timeout},
     };
-    use tokio_tungstenite::{connect_async, tungstenite};
+    use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite};
     use uuid::Uuid;
 
     const ERROR_NOT_IDENTIFIED: ErrorCode = ErrorCode::NotIdentified;
 
     async fn identify_connection(
-        socket: &mut tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
         token: Token,
         user_id: UserId,
     ) {
-        let identify = serde_json::to_string(&GatewayPayload::Identify { token }).unwrap();
+        let identify = to_string(&GatewayPayload::Identify { token }).unwrap();
         socket
             .send(tungstenite::Message::Text(identify.into()))
             .await
@@ -204,11 +205,11 @@ mod tests {
 
         let message = socket.next().await.unwrap().unwrap();
         let payload_text = message.into_text().unwrap();
-        let payload: GatewayPayload = serde_json::from_str(&payload_text).unwrap();
+        let payload: GatewayPayload = from_str(&payload_text).unwrap();
         match payload {
             GatewayPayload::Dispatch { t, d } => {
                 assert_eq!(t, "READY");
-                let ready: ReadyEvent = serde_json::from_value(d).unwrap();
+                let ready: ReadyEvent = from_value(d).unwrap();
                 assert_eq!(ready.user_id, user_id);
                 assert_eq!(ready.heartbeat_interval_ms, 25_000);
             }
@@ -217,9 +218,7 @@ mod tests {
     }
 
     async fn expect_error_dispatch(
-        socket: &mut tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
         code: ErrorCode,
     ) {
         let message = timeout(Duration::from_secs(1), socket.next())
@@ -228,7 +227,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let payload_text = message.into_text().unwrap();
-        let payload: GatewayPayload = serde_json::from_str(&payload_text).unwrap();
+        let payload: GatewayPayload = from_str(&payload_text).unwrap();
         match payload {
             GatewayPayload::Dispatch { t, d } => {
                 assert_eq!(t, "ERROR");
@@ -238,9 +237,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn subscribe_connection_is_idempotent() {
-        let state = Arc::new(AppState::new());
+    #[tokio::test]
+    async fn subscribe_connection_is_idempotent() {
+        let state = Arc::new(AppState::new(test_db()));
         let channel_id = ChannelId::from("general");
         let connection_id = ConnectionId::from(Uuid::new_v4());
 
@@ -257,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn broadcast_removes_stale_members() {
-        let state = Arc::new(AppState::new());
+        let state = Arc::new(AppState::new(test_db()));
         let channel_id = ChannelId::from("general");
         let stale_connection = ConnectionId::from(Uuid::new_v4());
         let active_connection = ConnectionId::from(Uuid::new_v4());
@@ -287,7 +286,7 @@ mod tests {
         let message = rx.recv().await.unwrap();
         match message {
             Message::Text(text) => {
-                let payload: GatewayPayload = serde_json::from_str(text.as_ref()).unwrap();
+                let payload: GatewayPayload = from_str(text.as_ref()).unwrap();
                 assert!(matches!(
                     payload,
                     GatewayPayload::Dispatch { t, .. } if t == "MESSAGE_CREATE"
@@ -305,9 +304,9 @@ mod tests {
         assert!(state.connection_channels.get(&active_connection).is_some());
     }
 
-    #[test]
-    fn cleanup_connection_removes_all_channels() {
-        let state = Arc::new(AppState::new());
+    #[tokio::test]
+    async fn cleanup_connection_removes_all_channels() {
+        let state = Arc::new(AppState::new(test_db()));
         let connection_id = ConnectionId::from(Uuid::new_v4());
         let (tx, _rx) = mpsc::unbounded_channel();
         state.connections.insert(connection_id, tx);
@@ -329,7 +328,7 @@ mod tests {
 
     #[tokio::test]
     async fn hello_payload_is_sent_on_connect() {
-        let state = Arc::new(AppState::new());
+        let state = Arc::new(AppState::new(test_db()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -342,7 +341,7 @@ mod tests {
 
         let message = socket.next().await.unwrap().unwrap();
         let text = message.into_text().unwrap();
-        let expected = serde_json::to_string(&GatewayPayload::Hello {
+        let expected = to_string(&GatewayPayload::Hello {
             heartbeat_interval_ms: 25_000,
         })
         .unwrap();
@@ -365,7 +364,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_is_ignored_when_not_identified() {
-        let state = Arc::new(AppState::new());
+        let state = Arc::new(AppState::new(test_db()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -378,7 +377,7 @@ mod tests {
         socket.next().await.unwrap().unwrap();
 
         let channel_id = ChannelId::from("general");
-        let subscribe = serde_json::to_string(&GatewayPayload::Subscribe {
+        let subscribe = to_string(&GatewayPayload::Subscribe {
             channel_id: channel_id.clone(),
         })
         .unwrap();
@@ -406,7 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn message_create_is_ignored_when_not_identified() {
-        let state = Arc::new(AppState::new());
+        let state = Arc::new(AppState::new(test_db()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -419,7 +418,7 @@ mod tests {
         socket.next().await.unwrap().unwrap();
 
         let channel_id = ChannelId::from("general");
-        let message = serde_json::to_string(&GatewayPayload::MessageCreate {
+        let message = to_string(&GatewayPayload::MessageCreate {
             channel_id: channel_id.clone(),
             content: "hello world".into(),
         })
@@ -447,7 +446,7 @@ mod tests {
 
     #[tokio::test]
     async fn message_create_broadcasts_to_channel_subscribers() {
-        let state = Arc::new(AppState::new());
+        let state = Arc::new(AppState::new(test_db()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -471,7 +470,7 @@ mod tests {
         identify_connection(&mut bob, bob_token, bob_user_id).await;
 
         let channel_id = ChannelId::from("general");
-        let subscribe = serde_json::to_string(&GatewayPayload::Subscribe {
+        let subscribe = to_string(&GatewayPayload::Subscribe {
             channel_id: channel_id.clone(),
         })
         .unwrap();
@@ -497,7 +496,7 @@ mod tests {
         .unwrap();
         assert_eq!(state.connection_channels.len(), 2);
 
-        let message = serde_json::to_string(&GatewayPayload::MessageCreate {
+        let message = to_string(&GatewayPayload::MessageCreate {
             channel_id: channel_id.clone(),
             content: "hello world".into(),
         })
@@ -509,7 +508,7 @@ mod tests {
 
         let next = bob.next().await.unwrap().unwrap();
         let payload_text = next.into_text().unwrap();
-        let payload: GatewayPayload = serde_json::from_str(&payload_text).unwrap();
+        let payload: GatewayPayload = from_str(&payload_text).unwrap();
         match payload {
             GatewayPayload::Dispatch { t, d } => {
                 assert_eq!(t, "MESSAGE_CREATE");
@@ -545,12 +544,12 @@ mod tests {
 
     #[tokio::test]
     async fn message_create_is_ignored_when_not_subscribed() {
-        let state = Arc::new(AppState::new());
+        let state = Arc::new(AppState::new(test_db()));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
+        let server = spawn(async move {
+            serve(listener, router).await.unwrap();
         });
 
         let url = format!("ws://{}/ws", addr);
@@ -569,7 +568,7 @@ mod tests {
         identify_connection(&mut bob, bob_token, bob_user_id).await;
 
         let channel_id = ChannelId::from("general");
-        let subscribe = serde_json::to_string(&GatewayPayload::Subscribe {
+        let subscribe = to_string(&GatewayPayload::Subscribe {
             channel_id: channel_id.clone(),
         })
         .unwrap();
@@ -591,7 +590,7 @@ mod tests {
         .await
         .unwrap();
 
-        let message = serde_json::to_string(&GatewayPayload::MessageCreate {
+        let message = to_string(&GatewayPayload::MessageCreate {
             channel_id: channel_id.clone(),
             content: "hello world".into(),
         })

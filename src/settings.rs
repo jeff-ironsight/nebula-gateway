@@ -9,6 +9,7 @@ pub struct Settings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ServerSettings {
     pub bind_addr: String,
+    pub database_url: String,
 }
 
 impl Settings {
