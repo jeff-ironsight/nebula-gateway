@@ -21,11 +21,11 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use crate::types::Token;
+    use crate::{state::test_db, types::Token};
 
     #[tokio::test]
     async fn non_route_returns_not_found() {
-        let router = build_router(Arc::new(AppState::new()));
+        let router = build_router(Arc::new(AppState::new(test_db())));
 
         let request = Request::builder()
             .method("GET")
@@ -39,7 +39,7 @@ mod tests {
 
     #[tokio::test]
     async fn login_creates_token_and_persists_state() {
-        let state = Arc::new(AppState::new());
+        let state = Arc::new(AppState::new(test_db()));
         let router = build_router(state.clone());
 
         let request = Request::builder()

@@ -1,2 +1,3 @@
 [server]
 bind_addr = "127.0.0.1:3000"
+database_url = "postgres://root:rootpass@localhost:5432/nebuladb"

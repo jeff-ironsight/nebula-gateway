@@ -1,24 +1,25 @@
 #!/usr/bin/env just --justfile
 
-[group('DEV')]
+[group('LINT')]
+check:
+    cargo fmt --all && cargo clippy --all-targets --all-features --fix --allow-dirty && cargo test --all-features
 fmt:
-    cargo fmt --all && cargo clippy --all-targets --all-features
+	cargo fmt --all && cargo clippy --all-targets --all-features --fix --allow-dirty
 
 [group('BUILD')]
 release:
     cargo build --release
+debug:
+	RUST_LOG=debug cargo run
+run:
+	cargo run
 
 [group('GIT')]
 git-force:
     git push -f
+alias yeet := git-force
 git-fixup hash:
     git add --all && \
     git commit --fixup='{{ hash }}' && \
     git -c sequence.editor=: rebase -i --autosquash '{{ hash }}'^
-
-[group('TEST')]
-hello:
-    wscat -c ws://localhost:3000/ws
-
 alias fixup := git-fixup
-alias yeet := git-force
