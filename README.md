@@ -12,3 +12,11 @@ Nebula focuses on a clean, idiomatic Rust implementation of a gateway layer:
 
 This project is intentionally **backend-first** and designed as a learning and experimentation ground for building
 large-scale realtime systems in Rust.
+
+## Environment
+
+Copy the example file and edit values as needed:
+
+```bash
+cp .env.example .env
+```

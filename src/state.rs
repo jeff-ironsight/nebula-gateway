@@ -1,4 +1,5 @@
-use crate::types::{ChannelId, ConnectionId, OutboundTx, Token, UserId};
+use crate::auth0::Auth0Verifier;
+use crate::types::{ChannelId, ConnectionId, OutboundTx, UserId};
 use dashmap::{DashMap, DashSet};
 use sqlx::PgPool;
 #[cfg(test)]
@@ -13,6 +14,7 @@ use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 #[cfg(test)]
 use tokio::sync::OnceCell;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Session {
@@ -22,31 +24,57 @@ pub struct Session {
 
 pub struct AppState {
     pub db: PgPool,
-    pub auth_secret: Vec<u8>,
     pub connections: DashMap<ConnectionId, OutboundTx>,
-    pub auth_tokens: DashMap<Token, UserId>,
     pub sessions: DashMap<ConnectionId, Session>,
     pub channel_members: DashMap<ChannelId, DashSet<ConnectionId>>,
     pub connection_channels: DashMap<ConnectionId, DashSet<ChannelId>>,
+    pub auth0: Option<Auth0Verifier>,
 
     #[cfg(test)]
     pub dispatch_counter: AtomicUsize,
 }
 
 impl AppState {
-    pub fn new(db: PgPool, auth_secret: Vec<u8>) -> Self {
+    pub fn new(db: PgPool, auth0: Option<Auth0Verifier>) -> Self {
         Self {
             db,
-            auth_secret,
             connections: DashMap::new(),
-            auth_tokens: DashMap::new(),
             sessions: DashMap::new(),
             channel_members: DashMap::new(),
             connection_channels: DashMap::new(),
+            auth0,
 
             #[cfg(test)]
             dispatch_counter: AtomicUsize::new(0),
         }
+    }
+
+    pub async fn get_or_create_user_by_auth_sub(&self, sub: &str) -> Result<UserId, sqlx::Error> {
+        let mut tx = self.db.begin().await?;
+
+        if let Some(user_id) =
+            sqlx::query_scalar::<_, Uuid>("select id from users where auth_sub = $1")
+                .bind(sub)
+                .fetch_optional(&mut *tx)
+                .await?
+        {
+            tx.commit().await?;
+            return Ok(UserId::from(user_id));
+        }
+
+        let user_id = Uuid::new_v4();
+        let username = sub.to_string();
+        sqlx::query!(
+            "insert into users (id, username, auth_sub) values ($1, $2, $3)",
+            user_id,
+            username,
+            sub
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(UserId::from(user_id))
     }
 }
 
@@ -91,9 +119,4 @@ pub async fn test_db() -> PgPool {
         .await
         .expect("run test migrations");
     pool
-}
-
-#[cfg(test)]
-pub fn test_auth_secret() -> Vec<u8> {
-    "test-secret".as_bytes().to_vec()
 }

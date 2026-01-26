@@ -1,4 +1,5 @@
 mod app;
+mod auth0;
 mod gateway;
 mod protocol;
 mod rest;
@@ -6,6 +7,7 @@ mod settings;
 mod state;
 mod types;
 
+use crate::auth0::{Auth0Settings, Auth0Verifier};
 use crate::{settings::Settings, state::AppState};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -18,7 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = Settings::load().expect("failed to load configuration");
 
     let db = PgPool::connect(&settings.server.database_url).await?;
-    let state = Arc::new(AppState::new(db, settings.auth.token_secret.into_bytes()));
+    let auth0 = build_auth0(&settings)?;
+    let state = Arc::new(AppState::new(db, auth0));
 
     let app = app::build_router(state);
 
@@ -29,4 +32,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+fn build_auth0(settings: &Settings) -> Result<Option<Auth0Verifier>, Box<dyn std::error::Error>> {
+    let has_auth0 = settings.auth.issuer.is_some()
+        || settings.auth.audience.is_some()
+        || settings.auth.userinfo_url.is_some();
+    if !has_auth0 {
+        return Ok(None);
+    }
+
+    let Some(issuer) = settings.auth.issuer.clone() else {
+        return Err("auth.issuer is required when Auth0 settings are configured".into());
+    };
+    let Some(audience) = settings.auth.audience.clone() else {
+        return Err("auth.audience is required when auth.issuer is set".into());
+    };
+    let userinfo_url = settings.auth.userinfo_url.clone().unwrap_or_else(|| {
+        let mut issuer = issuer.clone();
+        if !issuer.ends_with('/') {
+            issuer.push('/');
+        }
+        format!("{issuer}userinfo")
+    });
+    let ttl = settings.auth.userinfo_cache_ttl_seconds.unwrap_or(900);
+
+    Ok(Some(Auth0Verifier::new(Auth0Settings {
+        issuer,
+        audience,
+        userinfo_url,
+        userinfo_cache_ttl: std::time::Duration::from_secs(ttl),
+    })))
 }

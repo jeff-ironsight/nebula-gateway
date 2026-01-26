@@ -9,7 +9,7 @@ use crate::{
     },
     protocol::{ErrorCode, GatewayPayload},
     state::AppState,
-    types::ConnectionId,
+    types::{ConnectionId, Token, UserId},
 };
 use axum::{
     Error,
@@ -71,9 +71,7 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
 
                 match from_str::<GatewayPayload>(text.as_str()) {
                     Ok(GatewayPayload::Identify { token }) => {
-                        let Some(user_id) =
-                            state.auth_tokens.get(&token).map(|entry| *entry.value())
-                        else {
+                        let Some(user_id) = resolve_user_id(&state, &token).await else {
                             dispatch_error_to_connection(
                                 &state,
                                 &connection_id,
@@ -166,16 +164,35 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
     reader_result
 }
 
+async fn resolve_user_id(state: &AppState, token: &Token) -> Option<UserId> {
+    let auth0 = state.auth0.as_ref()?;
+
+    match auth0.verify(&token.0).await {
+        Ok(claims) => match state.get_or_create_user_by_auth_sub(&claims.sub).await {
+            Ok(user_id) => Some(user_id),
+            Err(err) => {
+                debug!(error = %err, "auth0 user mapping failed");
+                None
+            }
+        },
+        Err(err) => {
+            debug!(error = ?err, "auth0 token verification failed");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         app,
+        auth0::{Auth0Settings, Auth0Verifier},
         gateway::handler::{
             broadcast_message_to_channel, cleanup_connection, subscribe_connection,
         },
         protocol::{ErrorCode, ReadyEvent},
-        state::{AppState, test_auth_secret, test_db},
+        state::{AppState, test_db},
         types::{ChannelId, Token, UserId},
     };
     use axum::serve;
@@ -237,9 +254,28 @@ mod tests {
         }
     }
 
+    fn test_auth0() -> Auth0Verifier {
+        Auth0Verifier::new_test(Auth0Settings {
+            issuer: "https://test-issuer".into(),
+            audience: "test-audience".into(),
+            userinfo_url: "https://example.invalid/userinfo".into(),
+            userinfo_cache_ttl: Duration::from_secs(60),
+        })
+    }
+
+    async fn seed_auth_user(state: &AppState, user_id: UserId, sub: &str) {
+        sqlx::query("insert into users (id, username, auth_sub) values ($1, $2, $3)")
+            .bind(user_id.0)
+            .bind(format!("user-{}", user_id.0))
+            .bind(sub)
+            .execute(&state.db)
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn subscribe_connection_is_idempotent() {
-        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
+        let state = Arc::new(AppState::new(test_db().await, None));
         let channel_id = ChannelId::from("general");
         let connection_id = ConnectionId::from(Uuid::new_v4());
 
@@ -256,7 +292,7 @@ mod tests {
 
     #[tokio::test]
     async fn broadcast_removes_stale_members() {
-        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
+        let state = Arc::new(AppState::new(test_db().await, None));
         let channel_id = ChannelId::from("general");
         let stale_connection = ConnectionId::from(Uuid::new_v4());
         let active_connection = ConnectionId::from(Uuid::new_v4());
@@ -306,7 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_connection_removes_all_channels() {
-        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
+        let state = Arc::new(AppState::new(test_db().await, None));
         let connection_id = ConnectionId::from(Uuid::new_v4());
         let (tx, _rx) = mpsc::unbounded_channel();
         state.connections.insert(connection_id, tx);
@@ -328,7 +364,7 @@ mod tests {
 
     #[tokio::test]
     async fn hello_payload_is_sent_on_connect() {
-        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
+        let state = Arc::new(AppState::new(test_db().await, None));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -364,7 +400,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_is_ignored_when_not_identified() {
-        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
+        let state = Arc::new(AppState::new(test_db().await, None));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -405,7 +441,7 @@ mod tests {
 
     #[tokio::test]
     async fn message_create_is_ignored_when_not_identified() {
-        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
+        let state = Arc::new(AppState::new(test_db().await, None));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -446,7 +482,7 @@ mod tests {
 
     #[tokio::test]
     async fn message_create_broadcasts_to_channel_subscribers() {
-        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
+        let state = Arc::new(AppState::new(test_db().await, Some(test_auth0())));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -462,10 +498,12 @@ mod tests {
         bob.next().await.unwrap().unwrap();
         let alice_user_id = UserId::from(Uuid::new_v4());
         let bob_user_id = UserId::from(Uuid::new_v4());
-        let alice_token = Token::new();
-        let bob_token = Token::new();
-        state.auth_tokens.insert(alice_token.clone(), alice_user_id);
-        state.auth_tokens.insert(bob_token.clone(), bob_user_id);
+        let alice_sub = format!("auth0|alice-{}", Uuid::new_v4());
+        let bob_sub = format!("auth0|bob-{}", Uuid::new_v4());
+        let alice_token = Token(alice_sub.clone());
+        let bob_token = Token(bob_sub.clone());
+        seed_auth_user(&state, alice_user_id, &alice_sub).await;
+        seed_auth_user(&state, bob_user_id, &bob_sub).await;
         identify_connection(&mut alice, alice_token, alice_user_id).await;
         identify_connection(&mut bob, bob_token, bob_user_id).await;
 
@@ -544,7 +582,7 @@ mod tests {
 
     #[tokio::test]
     async fn message_create_is_ignored_when_not_subscribed() {
-        let state = Arc::new(AppState::new(test_db().await, test_auth_secret()));
+        let state = Arc::new(AppState::new(test_db().await, Some(test_auth0())));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -560,10 +598,12 @@ mod tests {
         bob.next().await.unwrap().unwrap();
         let alice_user_id = UserId::from(Uuid::new_v4());
         let bob_user_id = UserId::from(Uuid::new_v4());
-        let alice_token = Token::new();
-        let bob_token = Token::new();
-        state.auth_tokens.insert(alice_token.clone(), alice_user_id);
-        state.auth_tokens.insert(bob_token.clone(), bob_user_id);
+        let alice_sub = format!("auth0|alice-{}", Uuid::new_v4());
+        let bob_sub = format!("auth0|bob-{}", Uuid::new_v4());
+        let alice_token = Token(alice_sub.clone());
+        let bob_token = Token(bob_sub.clone());
+        seed_auth_user(&state, alice_user_id, &alice_sub).await;
+        seed_auth_user(&state, bob_user_id, &bob_sub).await;
         identify_connection(&mut alice, alice_token, alice_user_id).await;
         identify_connection(&mut bob, bob_token, bob_user_id).await;
 

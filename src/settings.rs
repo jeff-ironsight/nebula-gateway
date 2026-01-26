@@ -15,7 +15,10 @@ pub struct ServerSettings {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AuthSettings {
-    pub token_secret: String,
+    pub issuer: Option<String>,
+    pub audience: Option<String>,
+    pub userinfo_url: Option<String>,
+    pub userinfo_cache_ttl_seconds: Option<u64>,
 }
 
 impl Settings {
