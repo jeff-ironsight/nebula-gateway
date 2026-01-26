@@ -47,8 +47,6 @@ pub enum Auth0Error {
     UserInfoFetch(String),
     InvalidIssuer,
     InvalidAudience,
-    MissingIssuer,
-    MissingAudience,
 }
 
 impl Auth0Verifier {
@@ -94,17 +92,15 @@ impl Auth0Verifier {
             .await
             .map_err(|err| Auth0Error::UserInfoFetch(err.to_string()))?;
 
-        let Some(iss) = claims.iss.as_deref() else {
-            return Err(Auth0Error::MissingIssuer);
-        };
-        if iss != self.settings.issuer {
+        if let Some(iss) = claims.iss.as_deref()
+            && iss != self.settings.issuer
+        {
             return Err(Auth0Error::InvalidIssuer);
         }
 
-        let Some(aud) = claims.aud.as_ref() else {
-            return Err(Auth0Error::MissingAudience);
-        };
-        if !aud_contains(aud, &self.settings.audience) {
+        if let Some(aud) = claims.aud.as_ref()
+            && !aud_contains(aud, &self.settings.audience)
+        {
             return Err(Auth0Error::InvalidAudience);
         }
 

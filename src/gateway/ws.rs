@@ -80,9 +80,15 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             debug!(?connection_id, "identify failed; invalid token");
                             continue;
                         };
+                        let username = state
+                            .get_username_by_user_id(&user_id)
+                            .await
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
                         state.sessions.insert(connection_id, Session { user_id });
                         debug!(?connection_id, ?user_id, "connection identified");
-                        dispatch_ready_to_connection(&state, &connection_id, &user_id);
+                        dispatch_ready_to_connection(&state, &connection_id, &user_id, &username);
                     }
                     Ok(GatewayPayload::Subscribe { channel_id }) => {
                         let Some(_user_id) = require_identified(&state, &connection_id) else {
@@ -213,6 +219,7 @@ mod tests {
         socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
         token: Token,
         user_id: UserId,
+        username: &str,
     ) {
         let identify = to_string(&GatewayPayload::Identify { token }).unwrap();
         socket
@@ -228,6 +235,7 @@ mod tests {
                 assert_eq!(t, "READY");
                 let ready: ReadyEvent = from_value(d).unwrap();
                 assert_eq!(ready.user_id, user_id);
+                assert_eq!(ready.username, username);
                 assert_eq!(ready.heartbeat_interval_ms, 25_000);
             }
             other => panic!("expected READY dispatch, got {:?}", other),
@@ -266,7 +274,7 @@ mod tests {
     async fn seed_auth_user(state: &AppState, user_id: UserId, sub: &str) {
         sqlx::query("insert into users (id, username, auth_sub) values ($1, $2, $3)")
             .bind(user_id.0)
-            .bind(format!("user-{}", user_id.0))
+            .bind(sub)
             .bind(sub)
             .execute(&state.db)
             .await
@@ -504,8 +512,8 @@ mod tests {
         let bob_token = Token(bob_sub.clone());
         seed_auth_user(&state, alice_user_id, &alice_sub).await;
         seed_auth_user(&state, bob_user_id, &bob_sub).await;
-        identify_connection(&mut alice, alice_token, alice_user_id).await;
-        identify_connection(&mut bob, bob_token, bob_user_id).await;
+        identify_connection(&mut alice, alice_token, alice_user_id, &alice_sub).await;
+        identify_connection(&mut bob, bob_token, bob_user_id, &bob_sub).await;
 
         let channel_id = ChannelId::from("general");
         let subscribe = to_string(&GatewayPayload::Subscribe {
@@ -604,8 +612,8 @@ mod tests {
         let bob_token = Token(bob_sub.clone());
         seed_auth_user(&state, alice_user_id, &alice_sub).await;
         seed_auth_user(&state, bob_user_id, &bob_sub).await;
-        identify_connection(&mut alice, alice_token, alice_user_id).await;
-        identify_connection(&mut bob, bob_token, bob_user_id).await;
+        identify_connection(&mut alice, alice_token, alice_user_id, &alice_sub).await;
+        identify_connection(&mut bob, bob_token, bob_user_id, &bob_sub).await;
 
         let channel_id = ChannelId::from("general");
         let subscribe = to_string(&GatewayPayload::Subscribe {

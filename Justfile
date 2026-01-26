@@ -6,7 +6,7 @@ DATABASE_URL := env("DATABASE_URL")
 
 [group('LINT')]
 check:
-    cargo fmt --all && cargo clippy --all-targets --all-features --fix --allow-dirty && cargo audit && cargo test --all-features
+    just migrate-up && cargo fmt --all && cargo clippy --all-targets --all-features --fix --allow-dirty && cargo audit && cargo test --all-features
 fmt:
 	cargo fmt --all && cargo clippy --all-targets --all-features --fix --allow-dirty
 

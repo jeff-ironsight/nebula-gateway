@@ -63,11 +63,10 @@ impl AppState {
         }
 
         let user_id = Uuid::new_v4();
-        let username = sub.to_string();
         sqlx::query!(
             "insert into users (id, username, auth_sub) values ($1, $2, $3)",
             user_id,
-            username,
+            Option::<String>::None,
             sub
         )
         .execute(&mut *tx)
@@ -75,6 +74,17 @@ impl AppState {
 
         tx.commit().await?;
         Ok(UserId::from(user_id))
+    }
+
+    pub async fn get_username_by_user_id(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar::<_, Option<String>>("select username from users where id = $1")
+            .bind(user_id.0)
+            .fetch_optional(&self.db)
+            .await
+            .map(|value| value.flatten())
     }
 }
 
