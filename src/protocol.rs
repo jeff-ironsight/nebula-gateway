@@ -29,6 +29,7 @@ pub struct MessageCreateEvent {
     pub id: Ulid,
     pub channel_id: ChannelId,
     pub author_user_id: UserId,
+    pub author_username: String,
     pub content: String,
     pub timestamp: String,
 }
@@ -110,6 +111,7 @@ mod tests {
             id: Ulid::new(),
             channel_id: ChannelId::from("general"),
             author_user_id: UserId::from(uuid::Uuid::nil()),
+            author_username: "test-user".into(),
             content: "hello".into(),
             timestamp: Utc::now().to_rfc3339(),
         };
@@ -119,6 +121,7 @@ mod tests {
         assert_eq!(parsed.id, message.id);
         assert_eq!(parsed.channel_id, message.channel_id);
         assert_eq!(parsed.author_user_id, message.author_user_id);
+        assert_eq!(parsed.author_username, message.author_username);
         assert_eq!(parsed.content, message.content);
     }
 

@@ -136,7 +136,19 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             );
                             continue;
                         }
-                        broadcast_message_to_channel(&state, &channel_id, &_user_id, &content);
+                        let username = state
+                            .get_username_by_user_id(&_user_id)
+                            .await
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+                        broadcast_message_to_channel(
+                            &state,
+                            &channel_id,
+                            &_user_id,
+                            &username,
+                            &content,
+                        );
                     }
                     Ok(_other) => {
                         // Ignore unhandled payloads for now
@@ -325,7 +337,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         state.connections.insert(active_connection, tx);
 
-        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "hello");
+        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "active-user", "hello");
 
         let message = rx.recv().await.unwrap();
         match message {
@@ -562,6 +574,7 @@ mod tests {
                 assert_eq!(d.get("content"), Some(&json!("hello world")));
                 assert!(d.get("id").and_then(|value| value.as_str()).is_some());
                 assert_eq!(d.get("author_user_id"), Some(&json!(alice_user_id)));
+                assert_eq!(d.get("author_username"), Some(&json!(alice_sub)));
                 assert!(
                     d.get("timestamp")
                         .and_then(|value| value.as_str())
