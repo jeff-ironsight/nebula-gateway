@@ -37,6 +37,7 @@ pub struct MessageCreateEvent {
 pub struct ReadyEvent {
     pub connection_id: ConnectionId,
     pub user_id: UserId,
+    pub username: String,
     pub heartbeat_interval_ms: u64,
 }
 
@@ -126,6 +127,7 @@ mod tests {
         let ready = ReadyEvent {
             connection_id: ConnectionId::from(uuid::Uuid::new_v4()),
             user_id: UserId(uuid::Uuid::nil()),
+            username: "test-user".into(),
             heartbeat_interval_ms: 25_000,
         };
 
@@ -133,6 +135,7 @@ mod tests {
         let parsed: ReadyEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.connection_id, ready.connection_id);
         assert_eq!(parsed.user_id, ready.user_id);
+        assert_eq!(parsed.username, ready.username);
         assert_eq!(parsed.heartbeat_interval_ms, ready.heartbeat_interval_ms);
     }
 }
