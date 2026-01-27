@@ -130,3 +130,39 @@ pub async fn test_db() -> PgPool {
         .expect("run test migrations");
     pool
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn get_or_create_user_by_auth_sub_is_idempotent() {
+        let state = AppState::new(test_db().await, None);
+        let first = state
+            .get_or_create_user_by_auth_sub("auth0|abc123")
+            .await
+            .expect("create user");
+        let second = state
+            .get_or_create_user_by_auth_sub("auth0|abc123")
+            .await
+            .expect("fetch user");
+
+        assert_eq!(first.0, second.0);
+    }
+
+    #[tokio::test]
+    async fn get_username_by_user_id_returns_none_for_missing_username() {
+        let state = AppState::new(test_db().await, None);
+        let user_id = state
+            .get_or_create_user_by_auth_sub("auth0|no-username")
+            .await
+            .expect("create user");
+
+        let username = state
+            .get_username_by_user_id(&user_id)
+            .await
+            .expect("fetch username");
+
+        assert!(username.is_none());
+    }
+}

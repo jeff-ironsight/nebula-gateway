@@ -161,3 +161,152 @@ impl Clone for Auth0Verifier {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn aud_contains_handles_string_and_array() {
+        let single = serde_json::Value::String("expected".to_string());
+        assert!(aud_contains(&single, "expected"));
+        assert!(!aud_contains(&single, "other"));
+
+        let array = serde_json::json!(["first", "expected"]);
+        assert!(aud_contains(&array, "expected"));
+        assert!(!aud_contains(&array, "missing"));
+
+        let non_string = serde_json::json!(42);
+        assert!(!aud_contains(&non_string, "expected"));
+    }
+
+    #[tokio::test]
+    async fn verify_bypass_returns_sub() {
+        let settings = Auth0Settings {
+            issuer: "https://issuer.example".to_string(),
+            audience: "https://audience.example".to_string(),
+            userinfo_url: "https://userinfo.example".to_string(),
+            userinfo_cache_ttl: Duration::from_secs(60),
+        };
+
+        let verifier = Auth0Verifier::new_test(settings);
+        let claims = verifier.verify("token-123").await.expect("verify");
+
+        assert_eq!(claims.sub, "token-123");
+    }
+
+    #[tokio::test]
+    async fn cache_respects_ttl() {
+        let settings = Auth0Settings {
+            issuer: "https://issuer.example".to_string(),
+            audience: "https://audience.example".to_string(),
+            userinfo_url: "https://userinfo.example".to_string(),
+            userinfo_cache_ttl: Duration::from_millis(50),
+        };
+
+        let verifier = Auth0Verifier::new(settings);
+        let claims = Auth0Claims {
+            sub: "user-1".to_string(),
+            iss: None,
+            aud: None,
+            exp: None,
+        };
+
+        verifier.store_cached("token", claims.clone()).await;
+        let cached = verifier.get_cached("token").await.expect("cached");
+        assert_eq!(cached.sub, "user-1");
+
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(verifier.get_cached("token").await.is_none());
+    }
+
+    fn settings_for(server: &MockServer) -> Auth0Settings {
+        Auth0Settings {
+            issuer: "https://issuer.example".to_string(),
+            audience: "https://audience.example".to_string(),
+            userinfo_url: format!("{}/userinfo", server.uri()),
+            userinfo_cache_ttl: Duration::from_secs(60),
+        }
+    }
+
+    #[tokio::test]
+    async fn verify_returns_status_error_on_non_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/userinfo"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let verifier = Auth0Verifier::new(settings_for(&server));
+        let result = verifier.verify("bad-token").await;
+
+        match result {
+            Err(Auth0Error::UserInfoStatus(code)) => assert_eq!(code, 401),
+            other => panic!("expected status error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn verify_returns_invalid_issuer() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/userinfo"))
+            .and(header("authorization", "Bearer token-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sub": "user-123",
+                "iss": "https://wrong-issuer.example"
+            })))
+            .mount(&server)
+            .await;
+
+        let verifier = Auth0Verifier::new(settings_for(&server));
+        let result = verifier.verify("token-123").await;
+
+        assert!(matches!(result, Err(Auth0Error::InvalidIssuer)));
+    }
+
+    #[tokio::test]
+    async fn verify_returns_invalid_audience() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/userinfo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sub": "user-123",
+                "aud": ["https://other.example"]
+            })))
+            .mount(&server)
+            .await;
+
+        let verifier = Auth0Verifier::new(settings_for(&server));
+        let result = verifier.verify("token-456").await;
+
+        assert!(matches!(result, Err(Auth0Error::InvalidAudience)));
+    }
+
+    #[tokio::test]
+    async fn verify_caches_successful_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/userinfo"))
+            .and(header("authorization", "Bearer token-789"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sub": "user-789",
+                "iss": "https://issuer.example",
+                "aud": "https://audience.example"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let verifier = Auth0Verifier::new(settings_for(&server));
+        let claims = verifier.verify("token-789").await.expect("verify");
+        assert_eq!(claims.sub, "user-789");
+
+        let cached = verifier.verify("token-789").await.expect("verify cached");
+        assert_eq!(cached.sub, "user-789");
+    }
+}

@@ -30,3 +30,4 @@ uuid = { version = "1.19.0", features = ["v4", "serde"] }
 testcontainers-modules = { version = "0.14.0", features = ["postgres"] }
 tokio-tungstenite = "0.28.0"
 tower = { version = "0.5", features = ["util"] }
+wiremock = "0.6.5"
