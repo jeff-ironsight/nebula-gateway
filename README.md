@@ -1,3 +1,4 @@
+<!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
   <img width="450" height="128" alt="Nebula Logo" src="https://github.com/user-attachments/assets/fd7410c7-322c-4ec2-a17b-563b58081cfe" />
 </p>
@@ -9,6 +10,10 @@
   &nbsp;
   <a href="https://codecov.io/gh/jeff-ironsight/nebula-gateway">
     <img src="https://codecov.io/gh/jeff-ironsight/nebula-gateway/branch/main/graph/badge.svg" alt="Coverage" />
+  </a>
+  &nbsp;
+  <a href="https://libraries.io/github/jeff-ironsight/nebula-gateway">
+    <img src="https://img.shields.io/librariesio/github/jeff-ironsight/nebula-gateway" alt="Dependencies" />
   </a>
   &nbsp;
   <a href="https://doc.rust-lang.org/1.93.0/">
