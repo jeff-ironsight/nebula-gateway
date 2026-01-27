@@ -3,6 +3,7 @@
   <img width="450" height="128" alt="Nebula Logo" src="https://github.com/user-attachments/assets/fd7410c7-322c-4ec2-a17b-563b58081cfe" />
 </p>
 
+<br>
 <p align="center">
   <a href="https://github.com/jeff-ironsight/nebula-gateway/actions/workflows/audit.yml">
     <img src="https://github.com/jeff-ironsight/nebula-gateway/actions/workflows/audit.yml/badge.svg" alt="Cargo Audit">
@@ -21,10 +22,16 @@
   </a>
   &nbsp;
   <img src="https://visitorbadge.vercel.app//api/badge/80baad95-c492-47e4-bc8f-4abe518240e0?style=flat&color=98ccff&labelColor=5b5b5b" alt="Visits" />
-  &nbsp;
   <a href="https://github.com/jeff-ironsight/nebula-gateway/actions/workflows/ci.yml">
     <img src="https://github.com/jeff-ironsight/nebula-gateway/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" />
   </a>
+  &nbsp;<br>
+  <br>
+  <img src="https://img.shields.io/badge/rust-%23000000.svg?style=flat&logo=rust&logoColor=white" alt="Rust" />
+  &nbsp;
+  <img src="https://img.shields.io/badge/tokio-0B1320?style=flat&logo=tokio&logoColor=white " alt="tokio" />
+  &nbsp;
+  <img src="https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white" alt="Docker" />
 </p>
 
 ---
