@@ -245,10 +245,7 @@ mod tests {
     use serde_json::{from_value, json, to_string};
     use std::sync::atomic::Ordering;
     use tokio::net::{TcpListener, TcpStream};
-    use tokio::{
-        sync::mpsc,
-        time::{Duration, sleep, timeout},
-    };
+    use tokio::time::{Duration, sleep, timeout};
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite};
     use uuid::Uuid;
 
@@ -334,11 +331,11 @@ mod tests {
     #[tokio::test]
     async fn subscribe_connection_is_idempotent() {
         let state = Arc::new(AppState::new(test_db().await, None));
-        let channel_id = ChannelId::from("general");
+        let channel_id = ChannelId::from(Uuid::new_v4());
         let connection_id = ConnectionId::from(Uuid::new_v4());
 
-        subscribe_connection(&state, channel_id.clone(), connection_id);
-        subscribe_connection(&state, channel_id.clone(), connection_id);
+        subscribe_connection(&state, channel_id, connection_id);
+        subscribe_connection(&state, channel_id, connection_id);
 
         let members = state.channel_members.get(&channel_id).unwrap();
         assert_eq!(members.len(), 1);
@@ -351,13 +348,13 @@ mod tests {
     #[tokio::test]
     async fn broadcast_removes_stale_members() {
         let state = Arc::new(AppState::new(test_db().await, None));
-        let channel_id = ChannelId::from("general");
+        let channel_id = ChannelId::from(Uuid::new_v4());
         let stale_connection = ConnectionId::from(Uuid::new_v4());
         let active_connection = ConnectionId::from(Uuid::new_v4());
         let active_user_id = UserId::from(Uuid::new_v4());
 
         {
-            let members = state.channel_members.entry(channel_id.clone()).or_default();
+            let members = state.channel_members.entry(channel_id).or_default();
             members.insert(stale_connection);
             members.insert(active_connection);
         }
@@ -365,12 +362,12 @@ mod tests {
             .connection_channels
             .entry(stale_connection)
             .or_default()
-            .insert(channel_id.clone());
+            .insert(channel_id);
         state
             .connection_channels
             .entry(active_connection)
             .or_default()
-            .insert(channel_id.clone());
+            .insert(channel_id);
 
         let (tx, mut rx) = unbounded_channel();
         state.connections.insert(active_connection, tx);
@@ -401,13 +398,13 @@ mod tests {
     #[tokio::test]
     async fn broadcast_removes_closed_senders() {
         let state = Arc::new(AppState::new(test_db().await, None));
-        let channel_id = ChannelId::from("general");
+        let channel_id = ChannelId::from(Uuid::new_v4());
         let closed_connection = ConnectionId::from(Uuid::new_v4());
         let active_connection = ConnectionId::from(Uuid::new_v4());
         let active_user_id = UserId::from(Uuid::new_v4());
 
         {
-            let members = state.channel_members.entry(channel_id.clone()).or_default();
+            let members = state.channel_members.entry(channel_id).or_default();
             members.insert(closed_connection);
             members.insert(active_connection);
         }
@@ -415,18 +412,18 @@ mod tests {
             .connection_channels
             .entry(closed_connection)
             .or_default()
-            .insert(channel_id.clone());
+            .insert(channel_id);
         state
             .connection_channels
             .entry(active_connection)
             .or_default()
-            .insert(channel_id.clone());
+            .insert(channel_id);
 
-        let (closed_tx, closed_rx) = mpsc::unbounded_channel();
+        let (closed_tx, closed_rx) = unbounded_channel();
         drop(closed_rx);
         state.connections.insert(closed_connection, closed_tx);
 
-        let (active_tx, mut active_rx) = mpsc::unbounded_channel();
+        let (active_tx, mut active_rx) = unbounded_channel();
         state.connections.insert(active_connection, active_tx);
 
         broadcast_message_to_channel(&state, &channel_id, &active_user_id, "active_user", "hello");
@@ -456,10 +453,13 @@ mod tests {
     async fn cleanup_connection_removes_all_channels() {
         let state = Arc::new(AppState::new(test_db().await, None));
         let connection_id = ConnectionId::from(Uuid::new_v4());
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = unbounded_channel();
         state.connections.insert(connection_id, tx);
 
-        let channels = vec![ChannelId::from("alpha"), ChannelId::from("beta")];
+        let channels = vec![
+            ChannelId::from(Uuid::new_v4()),
+            ChannelId::from(Uuid::new_v4()),
+        ];
         for channel in channels.iter().cloned() {
             subscribe_connection(&state, channel, connection_id);
         }
@@ -516,7 +516,7 @@ mod tests {
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
+        let server = spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
 
@@ -524,11 +524,8 @@ mod tests {
         let (mut socket, _) = connect_async(&url).await.unwrap();
         socket.next().await.unwrap().unwrap();
 
-        let channel_id = ChannelId::from("general");
-        let subscribe = to_string(&GatewayPayload::Subscribe {
-            channel_id: channel_id.clone(),
-        })
-        .unwrap();
+        let channel_id = ChannelId::from(Uuid::new_v4());
+        let subscribe = to_string(&GatewayPayload::Subscribe { channel_id }).unwrap();
         socket
             .send(tungstenite::Message::Text(subscribe.into()))
             .await
@@ -557,7 +554,7 @@ mod tests {
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
+        let server = spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
 
@@ -565,9 +562,9 @@ mod tests {
         let (mut socket, _) = connect_async(&url).await.unwrap();
         socket.next().await.unwrap().unwrap();
 
-        let channel_id = ChannelId::from("general");
+        let channel_id = ChannelId::from(Uuid::new_v4());
         let message = to_string(&GatewayPayload::MessageCreate {
-            channel_id: channel_id.clone(),
+            channel_id,
             content: "hello world".into(),
         })
         .unwrap();
@@ -619,11 +616,8 @@ mod tests {
         identify_connection(&mut alice, alice_token, alice_user_id, &alice_sub).await;
         identify_connection(&mut bob, bob_token, bob_user_id, &bob_sub).await;
 
-        let channel_id = ChannelId::from("general");
-        let subscribe = to_string(&GatewayPayload::Subscribe {
-            channel_id: channel_id.clone(),
-        })
-        .unwrap();
+        let channel_id = ChannelId::from(Uuid::new_v4());
+        let subscribe = to_string(&GatewayPayload::Subscribe { channel_id }).unwrap();
         alice
             .send(tungstenite::Message::Text(subscribe.clone().into()))
             .await
@@ -647,7 +641,7 @@ mod tests {
         assert_eq!(state.connection_channels.len(), 2);
 
         let message = to_string(&GatewayPayload::MessageCreate {
-            channel_id: channel_id.clone(),
+            channel_id,
             content: "hello world".into(),
         })
         .unwrap();
@@ -719,11 +713,8 @@ mod tests {
         identify_connection(&mut alice, alice_token, alice_user_id, &alice_sub).await;
         identify_connection(&mut bob, bob_token, bob_user_id, &bob_sub).await;
 
-        let channel_id = ChannelId::from("general");
-        let subscribe = to_string(&GatewayPayload::Subscribe {
-            channel_id: channel_id.clone(),
-        })
-        .unwrap();
+        let channel_id = ChannelId::from(Uuid::new_v4());
+        let subscribe = to_string(&GatewayPayload::Subscribe { channel_id }).unwrap();
         bob.send(tungstenite::Message::Text(subscribe.into()))
             .await
             .unwrap();
@@ -743,7 +734,7 @@ mod tests {
         .unwrap();
 
         let message = to_string(&GatewayPayload::MessageCreate {
-            channel_id: channel_id.clone(),
+            channel_id,
             content: "hello world".into(),
         })
         .unwrap();

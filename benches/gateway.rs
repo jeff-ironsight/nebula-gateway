@@ -44,7 +44,7 @@ fn bench_broadcast_message(c: &mut Criterion) {
             .expect("create lazy pool");
         let state = Arc::new(AppState::new(db, None));
 
-        let channel_id = ChannelId::from("bench-channel");
+        let channel_id = ChannelId::from(Uuid::new_v4());
         let author_id = UserId::from(Uuid::new_v4());
 
         let mut receivers = Vec::new();
@@ -52,7 +52,7 @@ fn bench_broadcast_message(c: &mut Criterion) {
             let (tx, rx) = unbounded_channel();
             let connection_id = ConnectionId::from(Uuid::new_v4());
             state.connections.insert(connection_id, tx);
-            subscribe_connection(&state, channel_id.clone(), connection_id);
+            subscribe_connection(&state, channel_id, connection_id);
             receivers.push(rx);
         }
 

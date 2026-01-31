@@ -110,7 +110,7 @@ mod tests {
     fn message_create_event_round_trip() {
         let message = MessageCreateEvent {
             id: Ulid::new(),
-            channel_id: ChannelId::from("general"),
+            channel_id: ChannelId::from(uuid::Uuid::nil()),
             author_user_id: UserId::from(uuid::Uuid::nil()),
             author_username: "test-user".into(),
             content: "hello".into(),
