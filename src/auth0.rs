@@ -313,4 +313,229 @@ mod tests {
 
         // Mock expects exactly 1 call - second uses cache
     }
+
+    #[tokio::test]
+    async fn verify_rejects_malformed_token() {
+        let settings = test_settings("https://example.invalid/.well-known/jwks.json");
+        let verifier = Auth0Verifier::new(settings);
+
+        let result = verifier.verify("not-a-valid-jwt").await;
+        assert!(matches!(result, Err(Auth0Error::InvalidToken(_))));
+    }
+
+    #[tokio::test]
+    async fn verify_rejects_token_without_kid() {
+        let settings = test_settings("https://example.invalid/.well-known/jwks.json");
+        let verifier = Auth0Verifier::new(settings);
+
+        // A valid JWT structure but with no kid in header
+        // Header: {"alg":"RS256","typ":"JWT"} (no kid)
+        // This is base64url encoded
+        let token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.fake-signature";
+
+        let result = verifier.verify(token).await;
+        assert!(matches!(result, Err(Auth0Error::NoKidInToken)));
+    }
+
+    #[tokio::test]
+    async fn verify_rejects_unknown_kid() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/jwks.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "keys": [{
+                    "kid": "known-key-id",
+                    "kty": "RSA",
+                    "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+                    "e": "AQAB"
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let settings = test_settings(&format!("{}/.well-known/jwks.json", server.uri()));
+        let verifier = Auth0Verifier::new(settings);
+
+        // Token with kid="unknown-key-id" in header
+        // Header: {"alg":"RS256","typ":"JWT","kid":"unknown-key-id"}
+        let token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InVua25vd24ta2V5LWlkIn0.eyJzdWIiOiJ0ZXN0In0.fake-signature";
+
+        let result = verifier.verify(token).await;
+        assert!(matches!(result, Err(Auth0Error::UnknownKid(kid)) if kid == "unknown-key-id"));
+    }
+
+    #[test]
+    fn is_developer_returns_false_when_app_is_none() {
+        let claims = Auth0Claims {
+            sub: "user".to_string(),
+            iss: None,
+            aud: None,
+            exp: None,
+            app: None,
+        };
+        assert!(!claims.is_developer());
+    }
+
+    #[test]
+    fn is_developer_returns_false_when_flag_is_false() {
+        let claims = Auth0Claims {
+            sub: "user".to_string(),
+            iss: None,
+            aud: None,
+            exp: None,
+            app: Some(AppClaims {
+                is_developer: false,
+            }),
+        };
+        assert!(!claims.is_developer());
+    }
+
+    #[test]
+    fn is_developer_returns_true_when_flag_is_true() {
+        let claims = Auth0Claims {
+            sub: "user".to_string(),
+            iss: None,
+            aud: None,
+            exp: None,
+            app: Some(AppClaims { is_developer: true }),
+        };
+        assert!(claims.is_developer());
+    }
+
+    #[tokio::test]
+    async fn jwks_skips_non_rsa_keys() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/jwks.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "keys": [
+                    {
+                        "kid": "ec-key",
+                        "kty": "EC",
+                        "crv": "P-256",
+                        "x": "test",
+                        "y": "test"
+                    },
+                    {
+                        "kid": "rsa-key",
+                        "kty": "RSA",
+                        "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+                        "e": "AQAB"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let settings = test_settings(&format!("{}/.well-known/jwks.json", server.uri()));
+        let verifier = Auth0Verifier::new(settings);
+
+        // RSA key should be found
+        let result = verifier.get_decoding_key("rsa-key").await;
+        assert!(result.is_ok());
+
+        // EC key should not be found (skipped)
+        let result = verifier.get_decoding_key("ec-key").await;
+        assert!(matches!(result, Err(Auth0Error::UnknownKid(_))));
+    }
+
+    #[tokio::test]
+    async fn jwks_skips_rsa_keys_missing_components() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/jwks.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "keys": [
+                    {
+                        "kid": "missing-n",
+                        "kty": "RSA",
+                        "e": "AQAB"
+                    },
+                    {
+                        "kid": "missing-e",
+                        "kty": "RSA",
+                        "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let settings = test_settings(&format!("{}/.well-known/jwks.json", server.uri()));
+        let verifier = Auth0Verifier::new(settings);
+
+        // Both keys should be skipped due to missing components
+        let result = verifier.get_decoding_key("missing-n").await;
+        assert!(matches!(result, Err(Auth0Error::UnknownKid(_))));
+
+        let result = verifier.get_decoding_key("missing-e").await;
+        assert!(matches!(result, Err(Auth0Error::UnknownKid(_))));
+    }
+
+    #[tokio::test]
+    async fn expired_cache_triggers_refresh() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/jwks.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "keys": [{
+                    "kid": "test-key-id",
+                    "kty": "RSA",
+                    "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+                    "e": "AQAB"
+                }]
+            })))
+            .expect(2) // Expect 2 calls due to cache expiration
+            .mount(&server)
+            .await;
+
+        let settings = Auth0Settings {
+            issuer: "https://issuer.example/".to_string(),
+            audience: "https://audience.example".to_string(),
+            jwks_url: format!("{}/.well-known/jwks.json", server.uri()),
+            jwks_cache_ttl: Duration::from_millis(1), // Very short TTL
+        };
+        let verifier = Auth0Verifier::new(settings);
+
+        // First call fetches from network
+        let _ = verifier.get_decoding_key("test-key-id").await;
+
+        // Wait for cache to expire
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Second call should fetch again due to expired cache
+        let _ = verifier.get_decoding_key("test-key-id").await;
+
+        // Mock expects exactly 2 calls
+    }
+
+    #[tokio::test]
+    async fn clone_resets_cache() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/jwks.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "keys": [{
+                    "kid": "test-key-id",
+                    "kty": "RSA",
+                    "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+                    "e": "AQAB"
+                }]
+            })))
+            .expect(2) // Original + clone each fetch
+            .mount(&server)
+            .await;
+
+        let settings = test_settings(&format!("{}/.well-known/jwks.json", server.uri()));
+        let verifier = Auth0Verifier::new(settings);
+
+        // Populate cache
+        let _ = verifier.get_decoding_key("test-key-id").await;
+
+        // Clone should have empty cache
+        let cloned = verifier.clone();
+        let _ = cloned.get_decoding_key("test-key-id").await;
+
+        // Mock expects 2 calls - clone doesn't share cache
+    }
 }
