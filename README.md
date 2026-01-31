@@ -24,8 +24,7 @@
   <a href="https://github.com/jeff-ironsight/nebula-gateway/actions/workflows/ci.yml">
     <img src="https://github.com/jeff-ironsight/nebula-gateway/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" />
   </a>
-  &nbsp;<br>
-  <br>
+  <br><br>
   <img src="https://img.shields.io/badge/rust-%23000000.svg?style=flat&logo=rust&logoColor=white" alt="Rust" />
   &nbsp;
   <img src="https://img.shields.io/badge/tokio-0B1320?style=flat&logo=tokio&logoColor=white " alt="tokio" />
