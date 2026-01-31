@@ -37,6 +37,7 @@ pub fn broadcast_message_to_channel(
     state: &Arc<AppState>,
     channel_id: &ChannelId,
     author_user_id: &UserId,
+    author_username: &str,
     content: &str,
 ) {
     let Some(members) = state.channel_members.get(channel_id) else {
@@ -51,6 +52,7 @@ pub fn broadcast_message_to_channel(
         id: Ulid::new(),
         channel_id: channel_id.clone(),
         author_user_id: *author_user_id,
+        author_username: author_username.to_string(),
         content: content.to_string(),
         timestamp: Utc::now().to_rfc3339(),
     };

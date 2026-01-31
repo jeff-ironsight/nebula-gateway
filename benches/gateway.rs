@@ -62,6 +62,7 @@ fn bench_broadcast_message(c: &mut Criterion) {
                     black_box(&state),
                     black_box(&channel_id),
                     black_box(&author_id),
+                    black_box("bench-user"),
                     black_box("hello benchmark"),
                 );
                 for rx in receivers.iter_mut() {

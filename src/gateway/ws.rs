@@ -149,7 +149,22 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             );
                             continue;
                         }
-                        broadcast_message_to_channel(&state, &channel_id, &_user_id, &content);
+                        let _username = {
+                            let users = UserRepository::new(&state.db);
+                            users
+                                .get_username_by_id(&_user_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default()
+                        };
+                        broadcast_message_to_channel(
+                            &state,
+                            &channel_id,
+                            &_user_id,
+                            &_username,
+                            &content,
+                        );
                     }
                     Ok(_other) => {
                         // Ignore unhandled payloads for now
@@ -357,10 +372,10 @@ mod tests {
             .or_default()
             .insert(channel_id.clone());
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = unbounded_channel();
         state.connections.insert(active_connection, tx);
 
-        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "hello");
+        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "active_user", "hello");
 
         let message = rx.recv().await.unwrap();
         match message {
@@ -414,7 +429,7 @@ mod tests {
         let (active_tx, mut active_rx) = mpsc::unbounded_channel();
         state.connections.insert(active_connection, active_tx);
 
-        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "hello");
+        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "active_user", "hello");
 
         let message = active_rx.recv().await.unwrap();
         match message {
