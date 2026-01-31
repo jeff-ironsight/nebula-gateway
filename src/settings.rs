@@ -17,8 +17,8 @@ pub struct ServerSettings {
 pub struct AuthSettings {
     pub issuer: Option<String>,
     pub audience: Option<String>,
-    pub userinfo_url: Option<String>,
-    pub userinfo_cache_ttl_seconds: Option<u64>,
+    pub jwks_url: Option<String>,
+    pub jwks_cache_ttl_seconds: Option<u64>,
 }
 
 impl Settings {
@@ -82,7 +82,7 @@ mod tests {
         let settings = Settings::load().expect("load settings");
         assert!(!settings.server.bind_addr.is_empty());
         assert!(!settings.server.database_url.is_empty());
-        assert!(settings.auth.userinfo_url.is_some());
+        assert!(settings.auth.issuer.is_some());
     }
 
     #[test]

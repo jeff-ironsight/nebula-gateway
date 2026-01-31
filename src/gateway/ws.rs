@@ -71,7 +71,7 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
 
                 match from_str::<GatewayPayload>(text.as_str()) {
                     Ok(GatewayPayload::Identify { token }) => {
-                        let Some(user_id) = resolve_user_id(&state, &token).await else {
+                        let Some(result) = resolver_user(&state, &token).await else {
                             dispatch_error_to_connection(
                                 &state,
                                 &connection_id,
@@ -81,14 +81,25 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             continue;
                         };
                         let username = state
-                            .get_username_by_user_id(&user_id)
+                            .get_username_by_user_id(&result.user_id)
                             .await
                             .ok()
                             .flatten()
                             .unwrap_or_default();
-                        state.sessions.insert(connection_id, Session { user_id });
-                        debug!(?connection_id, ?user_id, "connection identified");
-                        dispatch_ready_to_connection(&state, &connection_id, &user_id, &username);
+                        state.sessions.insert(
+                            connection_id,
+                            Session {
+                                user_id: result.user_id,
+                            },
+                        );
+                        debug!(?connection_id, user_id = ?result.user_id, "connection identified");
+                        dispatch_ready_to_connection(
+                            &state,
+                            &connection_id,
+                            &result.user_id,
+                            &username,
+                            result.is_developer,
+                        );
                     }
                     Ok(GatewayPayload::Subscribe { channel_id }) => {
                         let Some(_user_id) = require_identified(&state, &connection_id) else {
@@ -170,12 +181,20 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
     reader_result
 }
 
-async fn resolve_user_id(state: &AppState, token: &Token) -> Option<UserId> {
+struct IdentifyResult {
+    user_id: UserId,
+    is_developer: bool,
+}
+
+async fn resolver_user(state: &AppState, token: &Token) -> Option<IdentifyResult> {
     let auth0 = state.auth0.as_ref()?;
 
     match auth0.verify(&token.0).await {
         Ok(claims) => match state.get_or_create_user_by_auth_sub(&claims.sub).await {
-            Ok(user_id) => Some(user_id),
+            Ok(user_id) => Some(IdentifyResult {
+                user_id,
+                is_developer: claims.is_developer(),
+            }),
             Err(err) => {
                 debug!(error = %err, "auth0 user mapping failed");
                 None
@@ -221,6 +240,16 @@ mod tests {
         user_id: UserId,
         username: &str,
     ) {
+        identify_connection_with_developer(socket, token, user_id, username, false).await;
+    }
+
+    async fn identify_connection_with_developer(
+        socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+        token: Token,
+        user_id: UserId,
+        username: &str,
+        is_developer: bool,
+    ) {
         let identify = to_string(&GatewayPayload::Identify { token }).unwrap();
         socket
             .send(tungstenite::Message::Text(identify.into()))
@@ -237,6 +266,7 @@ mod tests {
                 assert_eq!(ready.user_id, user_id);
                 assert_eq!(ready.username, username);
                 assert_eq!(ready.heartbeat_interval_ms, 25_000);
+                assert_eq!(ready.is_developer, is_developer);
             }
             other => panic!("expected READY dispatch, got {:?}", other),
         }
@@ -264,10 +294,10 @@ mod tests {
 
     fn test_auth0() -> Auth0Verifier {
         Auth0Verifier::new_test(Auth0Settings {
-            issuer: "https://test-issuer".into(),
+            issuer: "https://test-issuer/".into(),
             audience: "test-audience".into(),
-            userinfo_url: "https://example.invalid/userinfo".into(),
-            userinfo_cache_ttl: Duration::from_secs(60),
+            jwks_url: "https://example.invalid/.well-known/jwks.json".into(),
+            jwks_cache_ttl: Duration::from_secs(60),
         })
     }
 
@@ -722,6 +752,113 @@ mod tests {
             0,
             "no dispatch should be emitted for an unsubscribed sender"
         );
+
+        server.abort();
+    }
+
+    fn test_auth0_with_developer(sub: &str) -> Auth0Verifier {
+        use crate::auth0::{AppClaims, Auth0Claims};
+
+        Auth0Verifier::new_test_with_claims(
+            Auth0Settings {
+                issuer: "https://test-issuer/".into(),
+                audience: "test-audience".into(),
+                jwks_url: "https://example.invalid/.well-known/jwks.json".into(),
+                jwks_cache_ttl: Duration::from_secs(60),
+            },
+            Auth0Claims {
+                sub: sub.to_string(),
+                iss: None,
+                aud: None,
+                exp: None,
+                app: Some(AppClaims { is_developer: true }),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn identify_returns_is_developer_true_for_developer_user() {
+        let dev_sub = format!("auth0|dev-{}", Uuid::new_v4());
+        let state = Arc::new(AppState::new(
+            test_db().await,
+            Some(test_auth0_with_developer(&dev_sub)),
+        ));
+        let router = app::build_router(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        let url = format!("ws://{}/ws", addr);
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+
+        // Consume Hello
+        socket.next().await.unwrap().unwrap();
+
+        let dev_user_id = UserId::from(Uuid::new_v4());
+        seed_auth_user(&state, dev_user_id, &dev_sub).await;
+
+        // Identify with developer token
+        identify_connection_with_developer(
+            &mut socket,
+            Token(dev_sub.clone()),
+            dev_user_id,
+            &dev_sub,
+            true,
+        )
+        .await;
+
+        socket.close(None).await.unwrap();
+        timeout(Duration::from_secs(1), async {
+            while !state.connections.is_empty() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn identify_returns_is_developer_false_for_regular_user() {
+        let state = Arc::new(AppState::new(test_db().await, Some(test_auth0())));
+        let router = app::build_router(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        let url = format!("ws://{}/ws", addr);
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+
+        // Consume Hello
+        socket.next().await.unwrap().unwrap();
+
+        let user_id = UserId::from(Uuid::new_v4());
+        let user_sub = format!("auth0|user-{}", Uuid::new_v4());
+        seed_auth_user(&state, user_id, &user_sub).await;
+
+        // Identify with regular token (is_developer should be false)
+        identify_connection_with_developer(
+            &mut socket,
+            Token(user_sub.clone()),
+            user_id,
+            &user_sub,
+            false,
+        )
+        .await;
+
+        socket.close(None).await.unwrap();
+        timeout(Duration::from_secs(1), async {
+            while !state.connections.is_empty() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
 
         server.abort();
     }

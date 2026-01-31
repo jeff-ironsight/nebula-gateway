@@ -39,6 +39,7 @@ pub struct ReadyEvent {
     pub user_id: UserId,
     pub username: String,
     pub heartbeat_interval_ms: u64,
+    pub is_developer: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +130,7 @@ mod tests {
             user_id: UserId(uuid::Uuid::nil()),
             username: "test-user".into(),
             heartbeat_interval_ms: 25_000,
+            is_developer: true,
         };
 
         let json = serde_json::to_string(&ready).unwrap();
@@ -137,5 +139,6 @@ mod tests {
         assert_eq!(parsed.user_id, ready.user_id);
         assert_eq!(parsed.username, ready.username);
         assert_eq!(parsed.heartbeat_interval_ms, ready.heartbeat_interval_ms);
+        assert_eq!(parsed.is_developer, ready.is_developer);
     }
 }

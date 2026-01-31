@@ -115,11 +115,13 @@ pub fn dispatch_ready_to_connection(
     connection_id: &ConnectionId,
     user_id: &UserId,
     username: &str,
+    is_developer: bool,
 ) {
     let event = ReadyEvent {
         connection_id: *connection_id,
         user_id: *user_id,
         username: username.to_string(),
+        is_developer,
         heartbeat_interval_ms: 25_000,
     };
     let payload = GatewayPayload::Dispatch {

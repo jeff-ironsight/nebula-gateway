@@ -26,9 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn build_auth0(settings: &Settings) -> Result<Option<Auth0Verifier>, Box<dyn std::error::Error>> {
-    let has_auth0 = settings.auth.issuer.is_some()
-        || settings.auth.audience.is_some()
-        || settings.auth.userinfo_url.is_some();
+    let has_auth0 = settings.auth.issuer.is_some() || settings.auth.audience.is_some();
     if !has_auth0 {
         return Ok(None);
     }
@@ -39,19 +37,20 @@ fn build_auth0(settings: &Settings) -> Result<Option<Auth0Verifier>, Box<dyn std
     let Some(audience) = settings.auth.audience.clone() else {
         return Err("auth.audience is required when auth.issuer is set".into());
     };
-    let userinfo_url = settings.auth.userinfo_url.clone().unwrap_or_else(|| {
-        let mut issuer = issuer.clone();
-        if !issuer.ends_with('/') {
-            issuer.push('/');
+
+    let jwks_url = settings.auth.jwks_url.clone().unwrap_or_else(|| {
+        let mut base = issuer.clone();
+        if !base.ends_with('/') {
+            base.push('/');
         }
-        format!("{issuer}userinfo")
+        format!("{base}.well-known/jwks.json")
     });
-    let ttl = settings.auth.userinfo_cache_ttl_seconds.unwrap_or(900);
+    let ttl = settings.auth.jwks_cache_ttl_seconds.unwrap_or(3600);
 
     Ok(Some(Auth0Verifier::new(Auth0Settings {
         issuer,
         audience,
-        userinfo_url,
-        userinfo_cache_ttl: std::time::Duration::from_secs(ttl),
+        jwks_url,
+        jwks_cache_ttl: std::time::Duration::from_secs(ttl),
     })))
 }

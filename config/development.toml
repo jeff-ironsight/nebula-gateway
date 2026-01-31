@@ -5,5 +5,3 @@ database_url = "postgres://root:rootpass@localhost:5432/nebuladb"
 [auth]
 issuer = "https://nebula-dev.ca.auth0.com/"
 audience = "https://api.nebula.dev"
-userinfo_url = "https://nebula-dev.ca.auth0.com/userinfo"
-userinfo_cache_ttl_seconds = 900

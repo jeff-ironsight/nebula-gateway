@@ -7,6 +7,9 @@ set dotenv-load := true
 DATABASE_URL := env("DATABASE_URL")
 COVERAGE_IGNORE_REGEX := env("COVERAGE_IGNORE_REGEX")
 
+_default:
+    @just --list
+
 [group('LINT')]
 check:
 	just migrate-up && \

@@ -1,34 +1,56 @@
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Auth0Settings {
     pub issuer: String,
     pub audience: String,
-    pub userinfo_url: String,
-    pub userinfo_cache_ttl: Duration,
+    pub jwks_url: String,
+    pub jwks_cache_ttl: Duration,
 }
 
 #[derive(Debug)]
 pub struct Auth0Verifier {
     settings: Auth0Settings,
     client: Client,
-    userinfo_cache: RwLock<HashMap<String, CachedUserInfo>>,
+    jwks_cache: RwLock<Option<CachedJwks>>,
     #[cfg(test)]
-    test_bypass: bool,
+    test_mode: Option<TestMode>,
 }
 
-#[derive(Debug)]
-struct CachedUserInfo {
+struct CachedJwks {
     fetched_at: Instant,
-    claims: Auth0Claims,
+    keys: HashMap<String, DecodingKey>,
 }
 
-#[allow(dead_code)]
+impl std::fmt::Debug for CachedJwks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedJwks")
+            .field("fetched_at", &self.fetched_at)
+            .field("keys", &format!("[{} keys]", self.keys.len()))
+            .finish()
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone)]
+enum TestMode {
+    /// Returns token as sub (for multi-user tests)
+    TokenAsSub,
+    /// Returns fixed claims
+    FixedClaims(Auth0Claims),
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct AppClaims {
+    #[serde(default)]
+    pub is_developer: bool,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Auth0Claims {
     pub sub: String,
@@ -38,15 +60,35 @@ pub struct Auth0Claims {
     pub aud: Option<serde_json::Value>,
     #[serde(default)]
     pub exp: Option<usize>,
+    #[serde(rename = "https://nebula.dev/app", default)]
+    pub app: Option<AppClaims>,
 }
 
-#[allow(dead_code)]
+impl Auth0Claims {
+    pub fn is_developer(&self) -> bool {
+        self.app.as_ref().map(|a| a.is_developer).unwrap_or(false)
+    }
+}
+
 #[derive(Debug)]
 pub enum Auth0Error {
-    UserInfoStatus(u16),
-    UserInfoFetch(String),
-    InvalidIssuer,
-    InvalidAudience,
+    JwksFetch(String),
+    NoKidInToken,
+    UnknownKid(String),
+    InvalidToken(String),
+}
+
+#[derive(Debug, Deserialize)]
+struct JwksResponse {
+    keys: Vec<Jwk>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Jwk {
+    kid: String,
+    kty: String,
+    n: Option<String>,
+    e: Option<String>,
 }
 
 impl Auth0Verifier {
@@ -54,99 +96,123 @@ impl Auth0Verifier {
         Self {
             settings,
             client: Client::new(),
-            userinfo_cache: RwLock::new(HashMap::new()),
+            jwks_cache: RwLock::new(None),
             #[cfg(test)]
-            test_bypass: false,
+            test_mode: None,
         }
     }
 
     pub async fn verify(&self, token: &str) -> Result<Auth0Claims, Auth0Error> {
         #[cfg(test)]
-        if self.test_bypass {
-            return Ok(Auth0Claims {
-                sub: token.to_string(),
-                iss: None,
-                aud: None,
-                exp: None,
+        if let Some(test_mode) = &self.test_mode {
+            return Ok(match test_mode {
+                TestMode::TokenAsSub => Auth0Claims {
+                    sub: token.to_string(),
+                    iss: None,
+                    aud: None,
+                    exp: None,
+                    app: None,
+                },
+                TestMode::FixedClaims(claims) => claims.clone(),
             });
         }
 
-        if let Some(claims) = self.get_cached(token).await {
-            return Ok(claims);
+        let header = decode_header(token).map_err(|e| Auth0Error::InvalidToken(e.to_string()))?;
+
+        let kid = header.kid.ok_or(Auth0Error::NoKidInToken)?;
+
+        let decoding_key = self.get_decoding_key(&kid).await?;
+
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&[&self.settings.issuer]);
+        validation.set_audience(&[&self.settings.audience]);
+
+        let token_data = decode::<Auth0Claims>(token, &decoding_key, &validation)
+            .map_err(|e| Auth0Error::InvalidToken(e.to_string()))?;
+
+        Ok(token_data.claims)
+    }
+
+    async fn get_decoding_key(&self, kid: &str) -> Result<DecodingKey, Auth0Error> {
+        // Check cache first
+        {
+            let cache = self.jwks_cache.read().await;
+            if let Some(cached) = cache.as_ref()
+                && cached.fetched_at.elapsed() <= self.settings.jwks_cache_ttl
+                && let Some(key) = cached.keys.get(kid)
+            {
+                return Ok(key.clone());
+            }
         }
 
+        // Fetch fresh JWKS
+        self.refresh_jwks().await?;
+
+        // Try again from cache
+        let cache = self.jwks_cache.read().await;
+        cache
+            .as_ref()
+            .and_then(|c| c.keys.get(kid).cloned())
+            .ok_or_else(|| Auth0Error::UnknownKid(kid.to_string()))
+    }
+
+    async fn refresh_jwks(&self) -> Result<(), Auth0Error> {
         let response = self
             .client
-            .get(&self.settings.userinfo_url)
-            .bearer_auth(token)
+            .get(&self.settings.jwks_url)
             .send()
             .await
-            .map_err(|err| Auth0Error::UserInfoFetch(err.to_string()))?;
+            .map_err(|e| Auth0Error::JwksFetch(e.to_string()))?;
 
         if !response.status().is_success() {
-            return Err(Auth0Error::UserInfoStatus(response.status().as_u16()));
+            return Err(Auth0Error::JwksFetch(format!(
+                "JWKS endpoint returned {}",
+                response.status()
+            )));
         }
 
-        let claims = response
-            .json::<Auth0Claims>()
+        let jwks: JwksResponse = response
+            .json()
             .await
-            .map_err(|err| Auth0Error::UserInfoFetch(err.to_string()))?;
+            .map_err(|e| Auth0Error::JwksFetch(e.to_string()))?;
 
-        if let Some(iss) = claims.iss.as_deref()
-            && iss != self.settings.issuer
-        {
-            return Err(Auth0Error::InvalidIssuer);
-        }
-
-        if let Some(aud) = claims.aud.as_ref()
-            && !aud_contains(aud, &self.settings.audience)
-        {
-            return Err(Auth0Error::InvalidAudience);
-        }
-
-        self.store_cached(token, claims.clone()).await;
-        Ok(claims)
-    }
-
-    async fn get_cached(&self, token: &str) -> Option<Auth0Claims> {
-        let cache = self.userinfo_cache.read().await;
-        cache.get(token).and_then(|entry| {
-            if entry.fetched_at.elapsed() <= self.settings.userinfo_cache_ttl {
-                Some(entry.claims.clone())
-            } else {
-                None
+        let mut keys = HashMap::new();
+        for jwk in jwks.keys {
+            if jwk.kty == "RSA"
+                && let (Some(n), Some(e)) = (&jwk.n, &jwk.e)
+                && let Ok(key) = DecodingKey::from_rsa_components(n, e)
+            {
+                keys.insert(jwk.kid.clone(), key);
             }
-        })
-    }
+        }
 
-    async fn store_cached(&self, token: &str, claims: Auth0Claims) {
-        let mut cache = self.userinfo_cache.write().await;
-        cache.insert(
-            token.to_string(),
-            CachedUserInfo {
-                fetched_at: Instant::now(),
-                claims,
-            },
-        );
+        let mut cache = self.jwks_cache.write().await;
+        *cache = Some(CachedJwks {
+            fetched_at: Instant::now(),
+            keys,
+        });
+
+        Ok(())
     }
 
     #[cfg(test)]
     pub fn new_test(settings: Auth0Settings) -> Self {
-        let mut verifier = Self::new(settings);
-        verifier.test_bypass = true;
-        verifier
+        Self {
+            settings,
+            client: Client::new(),
+            jwks_cache: RwLock::new(None),
+            test_mode: Some(TestMode::TokenAsSub),
+        }
     }
-}
 
-fn aud_contains(aud: &serde_json::Value, expected: &str) -> bool {
-    match aud {
-        serde_json::Value::String(value) => value == expected,
-        serde_json::Value::Array(values) => values.iter().any(|value| {
-            value
-                .as_str()
-                .is_some_and(|candidate| candidate == expected)
-        }),
-        _ => false,
+    #[cfg(test)]
+    pub fn new_test_with_claims(settings: Auth0Settings, claims: Auth0Claims) -> Self {
+        Self {
+            settings,
+            client: Client::new(),
+            jwks_cache: RwLock::new(None),
+            test_mode: Some(TestMode::FixedClaims(claims)),
+        }
     }
 }
 
@@ -155,9 +221,9 @@ impl Clone for Auth0Verifier {
         Self {
             settings: self.settings.clone(),
             client: self.client.clone(),
-            userinfo_cache: RwLock::new(HashMap::new()),
+            jwks_cache: RwLock::new(None),
             #[cfg(test)]
-            test_bypass: self.test_bypass,
+            test_mode: self.test_mode.clone(),
         }
     }
 }
@@ -165,148 +231,86 @@ impl Clone for Auth0Verifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-    use wiremock::matchers::{header, method, path};
+    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    #[test]
-    fn aud_contains_handles_string_and_array() {
-        let single = serde_json::Value::String("expected".to_string());
-        assert!(aud_contains(&single, "expected"));
-        assert!(!aud_contains(&single, "other"));
-
-        let array = serde_json::json!(["first", "expected"]);
-        assert!(aud_contains(&array, "expected"));
-        assert!(!aud_contains(&array, "missing"));
-
-        let non_string = serde_json::json!(42);
-        assert!(!aud_contains(&non_string, "expected"));
+    fn test_settings(jwks_url: &str) -> Auth0Settings {
+        Auth0Settings {
+            issuer: "https://issuer.example/".to_string(),
+            audience: "https://audience.example".to_string(),
+            jwks_url: jwks_url.to_string(),
+            jwks_cache_ttl: Duration::from_secs(60),
+        }
     }
 
     #[tokio::test]
-    async fn verify_bypass_returns_sub() {
-        let settings = Auth0Settings {
-            issuer: "https://issuer.example".to_string(),
-            audience: "https://audience.example".to_string(),
-            userinfo_url: "https://userinfo.example".to_string(),
-            userinfo_cache_ttl: Duration::from_secs(60),
-        };
-
+    async fn test_mode_returns_token_as_sub() {
+        let settings = test_settings("https://example.invalid/.well-known/jwks.json");
         let verifier = Auth0Verifier::new_test(settings);
-        let claims = verifier.verify("token-123").await.expect("verify");
 
-        assert_eq!(claims.sub, "token-123");
+        let claims = verifier.verify("user-123").await.expect("verify");
+        assert_eq!(claims.sub, "user-123");
+        assert!(!claims.is_developer());
     }
 
     #[tokio::test]
-    async fn cache_respects_ttl() {
-        let settings = Auth0Settings {
-            issuer: "https://issuer.example".to_string(),
-            audience: "https://audience.example".to_string(),
-            userinfo_url: "https://userinfo.example".to_string(),
-            userinfo_cache_ttl: Duration::from_millis(50),
-        };
-
-        let verifier = Auth0Verifier::new(settings);
+    async fn test_mode_with_developer_flag() {
+        let settings = test_settings("https://example.invalid/.well-known/jwks.json");
         let claims = Auth0Claims {
-            sub: "user-1".to_string(),
+            sub: "dev-user".to_string(),
             iss: None,
             aud: None,
             exp: None,
+            app: Some(AppClaims { is_developer: true }),
         };
+        let verifier = Auth0Verifier::new_test_with_claims(settings, claims);
 
-        verifier.store_cached("token", claims.clone()).await;
-        let cached = verifier.get_cached("token").await.expect("cached");
-        assert_eq!(cached.sub, "user-1");
-
-        tokio::time::sleep(Duration::from_millis(60)).await;
-        assert!(verifier.get_cached("token").await.is_none());
-    }
-
-    fn settings_for(server: &MockServer) -> Auth0Settings {
-        Auth0Settings {
-            issuer: "https://issuer.example".to_string(),
-            audience: "https://audience.example".to_string(),
-            userinfo_url: format!("{}/userinfo", server.uri()),
-            userinfo_cache_ttl: Duration::from_secs(60),
-        }
+        let result = verifier.verify("any-token").await.expect("verify");
+        assert_eq!(result.sub, "dev-user");
+        assert!(result.is_developer());
     }
 
     #[tokio::test]
-    async fn verify_returns_status_error_on_non_success() {
+    async fn jwks_fetch_failure_returns_error() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/userinfo"))
-            .respond_with(ResponseTemplate::new(401))
+            .and(path("/.well-known/jwks.json"))
+            .respond_with(ResponseTemplate::new(500))
             .mount(&server)
             .await;
 
-        let verifier = Auth0Verifier::new(settings_for(&server));
-        let result = verifier.verify("bad-token").await;
+        let settings = test_settings(&format!("{}/.well-known/jwks.json", server.uri()));
+        let verifier = Auth0Verifier::new(settings);
 
-        match result {
-            Err(Auth0Error::UserInfoStatus(code)) => assert_eq!(code, 401),
-            other => panic!("expected status error, got {other:?}"),
-        }
+        let result = verifier.refresh_jwks().await;
+        assert!(matches!(result, Err(Auth0Error::JwksFetch(_))));
     }
 
     #[tokio::test]
-    async fn verify_returns_invalid_issuer() {
+    async fn get_decoding_key_caches_jwks() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/userinfo"))
-            .and(header("authorization", "Bearer token-123"))
+            .and(path("/.well-known/jwks.json"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "sub": "user-123",
-                "iss": "https://wrong-issuer.example"
-            })))
-            .mount(&server)
-            .await;
-
-        let verifier = Auth0Verifier::new(settings_for(&server));
-        let result = verifier.verify("token-123").await;
-
-        assert!(matches!(result, Err(Auth0Error::InvalidIssuer)));
-    }
-
-    #[tokio::test]
-    async fn verify_returns_invalid_audience() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/userinfo"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "sub": "user-123",
-                "aud": ["https://other.example"]
-            })))
-            .mount(&server)
-            .await;
-
-        let verifier = Auth0Verifier::new(settings_for(&server));
-        let result = verifier.verify("token-456").await;
-
-        assert!(matches!(result, Err(Auth0Error::InvalidAudience)));
-    }
-
-    #[tokio::test]
-    async fn verify_caches_successful_response() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/userinfo"))
-            .and(header("authorization", "Bearer token-789"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "sub": "user-789",
-                "iss": "https://issuer.example",
-                "aud": "https://audience.example"
+                "keys": [{
+                    "kid": "test-key-id",
+                    "kty": "RSA",
+                    "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+                    "e": "AQAB"
+                }]
             })))
             .expect(1)
             .mount(&server)
             .await;
 
-        let verifier = Auth0Verifier::new(settings_for(&server));
-        let claims = verifier.verify("token-789").await.expect("verify");
-        assert_eq!(claims.sub, "user-789");
+        let settings = test_settings(&format!("{}/.well-known/jwks.json", server.uri()));
+        let verifier = Auth0Verifier::new(settings);
 
-        let cached = verifier.verify("token-789").await.expect("verify cached");
-        assert_eq!(cached.sub, "user-789");
+        // First call fetches from network
+        let _ = verifier.get_decoding_key("test-key-id").await;
+        // Second call uses cache
+        let _ = verifier.get_decoding_key("test-key-id").await;
+
+        // Mock expects exactly 1 call - second uses cache
     }
 }
