@@ -1,51 +1,38 @@
 use axum::extract::ws::Message;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ChannelId(pub Arc<str>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ChannelId(pub Uuid);
 
-impl From<&str> for ChannelId {
-    fn from(value: &str) -> Self {
-        Self(Arc::from(value))
-    }
-}
-impl From<String> for ChannelId {
-    fn from(value: String) -> Self {
-        Self(Arc::from(value))
-    }
-}
-impl AsRef<str> for ChannelId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Serialize for ChannelId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_ref())
-    }
-}
-
-impl<'de> Deserialize<'de> for ChannelId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Ok(ChannelId::from(value))
+impl From<Uuid> for ChannelId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
     }
 }
 
 impl fmt::Display for ChannelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_ref())
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ServerId(pub Uuid);
+
+impl From<Uuid> for ServerId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for ServerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

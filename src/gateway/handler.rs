@@ -16,7 +16,7 @@ pub fn subscribe_connection(
     channel_id: ChannelId,
     connection_id: ConnectionId,
 ) {
-    let members = state.channel_members.entry(channel_id.clone()).or_default();
+    let members = state.channel_members.entry(channel_id).or_default();
     let already_member = !members.insert(connection_id);
     drop(members);
 
@@ -50,7 +50,7 @@ pub fn broadcast_message_to_channel(
 
     let event = MessageCreateEvent {
         id: Ulid::new(),
-        channel_id: channel_id.clone(),
+        channel_id: *channel_id,
         author_user_id: *author_user_id,
         author_username: author_username.to_string(),
         content: content.to_string(),
