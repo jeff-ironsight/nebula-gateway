@@ -1,5 +1,6 @@
 pub mod app;
 pub mod auth0;
+pub mod data;
 pub mod gateway;
 pub mod protocol;
 pub mod rest;

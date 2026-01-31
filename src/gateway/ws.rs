@@ -1,3 +1,4 @@
+use crate::data::UserRepository;
 use crate::gateway::handler::{
     dispatch_error_to_connection, dispatch_hello_to_connection, dispatch_ready_to_connection,
     require_identified,
@@ -80,8 +81,9 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             debug!(?connection_id, "identify failed; invalid token");
                             continue;
                         };
-                        let username = state
-                            .get_username_by_user_id(&result.user_id)
+                        let users = UserRepository::new(&state.db);
+                        let username = users
+                            .get_username_by_id(&result.user_id)
                             .await
                             .ok()
                             .flatten()
@@ -190,16 +192,19 @@ async fn resolver_user(state: &AppState, token: &Token) -> Option<IdentifyResult
     let auth0 = state.auth0.as_ref()?;
 
     match auth0.verify(&token.0).await {
-        Ok(claims) => match state.get_or_create_user_by_auth_sub(&claims.sub).await {
-            Ok(user_id) => Some(IdentifyResult {
-                user_id,
-                is_developer: claims.is_developer(),
-            }),
-            Err(err) => {
-                debug!(error = %err, "auth0 user mapping failed");
-                None
+        Ok(claims) => {
+            let users = UserRepository::new(&state.db);
+            match users.get_or_create_by_auth_sub(&claims.sub).await {
+                Ok(user_id) => Some(IdentifyResult {
+                    user_id,
+                    is_developer: claims.is_developer(),
+                }),
+                Err(err) => {
+                    debug!(error = %err, "auth0 user mapping failed");
+                    None
+                }
             }
-        },
+        }
         Err(err) => {
             debug!(error = ?err, "auth0 token verification failed");
             None
