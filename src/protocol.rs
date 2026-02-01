@@ -11,17 +11,23 @@ pub enum GatewayPayload {
     Identify {
         token: Token,
     },
-    Subscribe {
-        channel_id: ChannelId,
-    },
+    /// Subscribe to all channels the user has access to.
+    Subscribe {},
     MessageCreate {
         channel_id: ChannelId,
         content: String,
     },
     Dispatch {
         t: String,
+        #[serde(flatten)]
         d: serde_json::Value,
     },
+}
+
+/// Event dispatched after successful subscription.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SubscribedEvent {
+    pub channel_ids: Vec<ChannelId>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

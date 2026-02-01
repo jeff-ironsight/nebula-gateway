@@ -1,5 +1,7 @@
 use crate::{
-    protocol::{ErrorCode, ErrorEvent, GatewayPayload, MessageCreateEvent, ReadyEvent},
+    protocol::{
+        ErrorCode, ErrorEvent, GatewayPayload, MessageCreateEvent, ReadyEvent, SubscribedEvent,
+    },
     state::AppState,
     types::{ChannelId, ConnectionId, UserId},
 };
@@ -11,17 +13,17 @@ use std::sync::atomic::Ordering;
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 
-pub fn subscribe_connection(
+pub fn subscribe_to_channel(
     state: &Arc<AppState>,
     channel_id: ChannelId,
     connection_id: ConnectionId,
 ) {
-    let members = state.channel_members.entry(channel_id).or_default();
-    let already_member = !members.insert(connection_id);
-    drop(members);
+    let subscribers = state.channel_subscribers.entry(channel_id).or_default();
+    let already_subscribed = !subscribers.insert(connection_id);
+    drop(subscribers);
 
-    if already_member {
-        debug!(?connection_id, channel = %channel_id, "connection already subscribed");
+    if already_subscribed {
+        debug!(?connection_id, channel = %channel_id, "connection already subscribed to channel");
     } else {
         info!(?connection_id, channel = %channel_id, "subscribed to channel");
     }
@@ -33,6 +35,16 @@ pub fn subscribe_connection(
         .insert(channel_id);
 }
 
+pub fn subscribe_to_channels(
+    state: &Arc<AppState>,
+    channel_ids: &[ChannelId],
+    connection_id: ConnectionId,
+) {
+    for &channel_id in channel_ids {
+        subscribe_to_channel(state, channel_id, connection_id);
+    }
+}
+
 pub fn broadcast_message_to_channel(
     state: &Arc<AppState>,
     channel_id: &ChannelId,
@@ -40,13 +52,13 @@ pub fn broadcast_message_to_channel(
     author_username: &str,
     content: &str,
 ) {
-    let Some(members) = state.channel_members.get(channel_id) else {
-        warn!(channel = %channel_id, "broadcast requested for channel with no members");
+    let Some(subscribers) = state.channel_subscribers.get(channel_id) else {
+        warn!(channel = %channel_id, "broadcast requested for channel with no subscribers");
         return;
     };
 
-    let member_ids: Vec<ConnectionId> = members.iter().map(|id| *id).collect();
-    drop(members);
+    let subscriber_ids: Vec<ConnectionId> = subscribers.iter().map(|id| *id).collect();
+    drop(subscribers);
 
     let event = MessageCreateEvent {
         id: Ulid::new(),
@@ -60,39 +72,39 @@ pub fn broadcast_message_to_channel(
         t: "MESSAGE_CREATE".into(),
         d: serde_json::to_value(event).expect("message payload should serialize"),
     };
-    debug!("sending message to channel {}", channel_id);
+    debug!(channel = %channel_id, "broadcasting message to channel subscribers");
 
     #[cfg(test)]
     state.dispatch_counter.fetch_add(1, Ordering::Relaxed);
 
-    let mut stale_members = Vec::new();
+    let mut stale_subscribers = Vec::new();
 
-    for member_id in member_ids {
-        match state.connections.get(&member_id) {
+    for subscriber_id in subscriber_ids {
+        match state.connections.get(&subscriber_id) {
             Some(tx) => {
                 if tx.send(text_msg(&payload).clone()).is_err() {
                     warn!(
-                        ?member_id,
+                        ?subscriber_id,
                         channel = %channel_id,
                         "failed to send message payload"
                     );
-                    stale_members.push(member_id);
+                    stale_subscribers.push(subscriber_id);
                 }
             }
             None => {
                 debug!(
-                    ?member_id,
+                    ?subscriber_id,
                     channel = %channel_id,
-                    "removing stale channel member missing connection"
+                    "removing stale channel subscriber missing connection"
                 );
-                stale_members.push(member_id);
+                stale_subscribers.push(subscriber_id);
             }
         }
     }
 
-    for member_id in stale_members {
-        remove_channel_membership(state, channel_id, &member_id);
-        remove_connection_channel(state, &member_id, channel_id);
+    for subscriber_id in stale_subscribers {
+        remove_channel_subscription(state, channel_id, &subscriber_id);
+        remove_connection_channel(state, &subscriber_id, channel_id);
     }
 }
 
@@ -143,6 +155,29 @@ pub fn dispatch_ready_to_connection(
     }
 }
 
+pub fn dispatch_subscribed_to_connection(
+    state: &Arc<AppState>,
+    connection_id: &ConnectionId,
+    channel_ids: Vec<ChannelId>,
+) {
+    let event = SubscribedEvent { channel_ids };
+    let payload = GatewayPayload::Dispatch {
+        t: "SUBSCRIBED".into(),
+        d: serde_json::to_value(event).expect("subscribed payload should serialize"),
+    };
+
+    if let Some(tx) = state.connections.get(connection_id) {
+        if tx.send(text_msg(&payload)).is_err() {
+            warn!(?connection_id, "failed to send subscribed payload");
+        }
+    } else {
+        debug!(
+            ?connection_id,
+            "cannot send subscribed payload to missing connection"
+        );
+    }
+}
+
 pub fn dispatch_error_to_connection(
     state: &Arc<AppState>,
     connection_id: &ConnectionId,
@@ -171,12 +206,12 @@ pub fn cleanup_connection(state: &Arc<AppState>, connection_id: &ConnectionId) {
     state.sessions.remove(connection_id);
     if let Some((_, channels)) = state.connection_channels.remove(connection_id) {
         for channel_id in channels.into_iter() {
-            remove_channel_membership(state, &channel_id, connection_id);
+            remove_channel_subscription(state, &channel_id, connection_id);
         }
     }
 }
 
-pub fn is_subscribed(
+pub fn is_subscribed_to_channel(
     state: &Arc<AppState>,
     connection_id: ConnectionId,
     channel_id: &ChannelId,
@@ -188,17 +223,17 @@ pub fn is_subscribed(
         .unwrap_or(false)
 }
 
-fn remove_channel_membership(
+fn remove_channel_subscription(
     state: &Arc<AppState>,
     channel_id: &ChannelId,
     connection_id: &ConnectionId,
 ) {
-    if let Some(entry) = state.channel_members.get_mut(channel_id) {
+    if let Some(entry) = state.channel_subscribers.get_mut(channel_id) {
         entry.value().remove(connection_id);
         let empty = entry.value().is_empty();
         drop(entry);
         if empty {
-            state.channel_members.remove(channel_id);
+            state.channel_subscribers.remove(channel_id);
         }
     }
 }

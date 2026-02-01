@@ -77,6 +77,33 @@ impl<'a> ChannelRepository<'a> {
             name,
         }))
     }
+
+    pub async fn get_channels_for_user(
+        &self,
+        user_id: &crate::types::UserId,
+    ) -> Result<Vec<Channel>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String)>(
+            r#"
+            select c.id, c.server_id, c.name
+            from channels c
+            join server_members sm on sm.server_id = c.server_id
+            where sm.user_id = $1
+            order by c.name
+            "#,
+        )
+        .bind(user_id.0)
+        .fetch_all(self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, server_id, name)| Channel {
+                id: ChannelId::from(id),
+                server_id: ServerId::from(server_id),
+                name,
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
