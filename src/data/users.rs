@@ -1,4 +1,4 @@
-use crate::types::UserId;
+use crate::types::{DEFAULT_SERVER_ID, UserId};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -34,6 +34,15 @@ impl<'a> UserRepository<'a> {
         .execute(&mut *tx)
         .await?;
 
+        // Auto-join new users to the default server
+        sqlx::query!(
+            "insert into server_members (server_id, user_id, role) values ($1, $2, 'member')",
+            DEFAULT_SERVER_ID.0,
+            user_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
         tx.commit().await?;
         Ok(UserId::from(user_id))
     }
@@ -53,6 +62,7 @@ impl<'a> UserRepository<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::ServerRepository;
     use crate::state::test_db;
 
     #[tokio::test]
@@ -88,5 +98,46 @@ mod tests {
             .expect("fetch username");
 
         assert!(username.is_none());
+    }
+
+    #[tokio::test]
+    async fn new_user_is_auto_joined_to_default_server() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+
+        let user_id = users
+            .get_or_create_by_auth_sub("auth0|auto-join-test")
+            .await
+            .expect("create user");
+
+        // User should be a member of the default server
+        let is_member = servers
+            .is_member(&DEFAULT_SERVER_ID, &user_id)
+            .await
+            .expect("check membership");
+
+        assert!(is_member);
+    }
+
+    #[tokio::test]
+    async fn new_user_sees_default_server_in_server_list() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+
+        let user_id = users
+            .get_or_create_by_auth_sub("auth0|server-list-test")
+            .await
+            .expect("create user");
+
+        let user_servers = servers
+            .get_servers_for_user(&user_id)
+            .await
+            .expect("get servers");
+
+        assert!(!user_servers.is_empty());
+        assert!(user_servers.iter().any(|s| s.id == DEFAULT_SERVER_ID));
+        assert!(user_servers.iter().any(|s| s.name == "Nebula"));
     }
 }
