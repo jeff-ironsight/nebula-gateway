@@ -247,13 +247,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_servers_returns_empty_for_new_user() {
+    async fn list_servers_returns_default_server_for_new_user() {
         let pool = test_db().await;
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
         // Create a user with unique auth sub
-        let auth_sub = format!("auth0|list-empty-{}", Uuid::new_v4());
+        let auth_sub = format!("auth0|list-default-{}", Uuid::new_v4());
         let users = UserRepository::new(&state.db);
         let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
 
@@ -271,7 +271,10 @@ mod tests {
             .await
             .unwrap();
         let servers: Vec<Value> = serde_json::from_slice(&body).unwrap();
-        assert!(servers.is_empty());
+
+        // New users are auto-joined to the default "Nebula" server
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0]["name"], "Nebula");
     }
 
     #[tokio::test]
@@ -318,8 +321,11 @@ mod tests {
             .await
             .unwrap();
         let servers: Vec<Value> = serde_json::from_slice(&body).unwrap();
-        assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0]["name"], "My Server");
+
+        // User has default server (auto-joined) + the one they created
+        assert_eq!(servers.len(), 2);
+        assert!(servers.iter().any(|s| s["name"] == "My Server"));
+        assert!(servers.iter().any(|s| s["name"] == "Nebula"));
     }
 
     #[tokio::test]

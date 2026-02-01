@@ -2,9 +2,6 @@ use crate::types::{ServerId, UserId};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Well-known UUID for the global default server
-pub const DEFAULT_SERVER_ID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_000000000001);
-
 pub struct Server {
     pub id: ServerId,
     pub name: String,
@@ -162,7 +159,9 @@ mod tests {
             .await
             .expect("get servers");
 
-        assert_eq!(user_servers.len(), 1);
-        assert_eq!(user_servers[0].name, "My Server");
+        // User has default server (auto-joined) + the one they created
+        assert_eq!(user_servers.len(), 2);
+        assert!(user_servers.iter().any(|s| s.name == "My Server"));
+        assert!(user_servers.iter().any(|s| s.name == "Nebula"));
     }
 }
