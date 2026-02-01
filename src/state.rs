@@ -25,7 +25,9 @@ pub struct AppState {
     pub db: PgPool,
     pub connections: DashMap<ConnectionId, OutboundTx>,
     pub sessions: DashMap<ConnectionId, Session>,
-    pub channel_members: DashMap<ChannelId, DashSet<ConnectionId>>,
+    /// Channel ID -> Set of connections subscribed to that channel
+    pub channel_subscribers: DashMap<ChannelId, DashSet<ConnectionId>>,
+    /// Connection ID -> Set of channels that connection is subscribed to
     pub connection_channels: DashMap<ConnectionId, DashSet<ChannelId>>,
     pub auth0: Option<Auth0Verifier>,
 
@@ -39,7 +41,7 @@ impl AppState {
             db,
             connections: DashMap::new(),
             sessions: DashMap::new(),
-            channel_members: DashMap::new(),
+            channel_subscribers: DashMap::new(),
             connection_channels: DashMap::new(),
             auth0,
 

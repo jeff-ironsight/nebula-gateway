@@ -1,6 +1,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use nebula::gateway::handler::subscribe_to_channel;
 use nebula::{
-    gateway::handler::{broadcast_message_to_channel, subscribe_connection},
+    gateway::handler::broadcast_message_to_channel,
     protocol::GatewayPayload,
     state::AppState,
     types::{ChannelId, ConnectionId, Token, UserId},
@@ -52,7 +53,7 @@ fn bench_broadcast_message(c: &mut Criterion) {
             let (tx, rx) = unbounded_channel();
             let connection_id = ConnectionId::from(Uuid::new_v4());
             state.connections.insert(connection_id, tx);
-            subscribe_connection(&state, channel_id, connection_id);
+            subscribe_to_channel(&state, channel_id, connection_id);
             receivers.push(rx);
         }
 
