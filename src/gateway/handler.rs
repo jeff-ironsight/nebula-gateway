@@ -1,6 +1,8 @@
 use crate::{
+    data::{ChannelRepository, ServerRepository},
     protocol::{
-        ErrorCode, ErrorEvent, GatewayPayload, MessageCreateEvent, ReadyEvent, SubscribedEvent,
+        ErrorCode, ErrorEvent, GatewayPayload, MessageCreateEvent, ReadyChannel, ReadyEvent,
+        ReadyServer, SubscribedEvent,
     },
     state::AppState,
     types::{ChannelId, ConnectionId, UserId},
@@ -124,19 +126,28 @@ pub fn dispatch_hello_to_connection(state: &Arc<AppState>, connection_id: &Conne
     }
 }
 
-pub fn dispatch_ready_to_connection(
+pub async fn dispatch_ready_to_connection(
     state: &Arc<AppState>,
     connection_id: &ConnectionId,
     user_id: &UserId,
     username: &str,
     is_developer: bool,
 ) {
+    let servers = match fetch_user_servers_with_channels(state, user_id).await {
+        Ok(servers) => servers,
+        Err(e) => {
+            warn!(?connection_id, error = %e, "failed to fetch user servers for ready event");
+            Vec::new()
+        }
+    };
+
     let event = ReadyEvent {
         connection_id: *connection_id,
         user_id: *user_id,
         username: username.to_string(),
         is_developer,
         heartbeat_interval_ms: 25_000,
+        servers,
     };
     let payload = GatewayPayload::Dispatch {
         t: "READY".into(),
@@ -153,6 +164,38 @@ pub fn dispatch_ready_to_connection(
             "cannot send ready payload to missing connection"
         );
     }
+}
+
+async fn fetch_user_servers_with_channels(
+    state: &Arc<AppState>,
+    user_id: &UserId,
+) -> Result<Vec<ReadyServer>, sqlx::Error> {
+    let server_repo = ServerRepository::new(&state.db);
+    let channel_repo = ChannelRepository::new(&state.db);
+
+    let servers = server_repo.get_servers_for_user(user_id).await?;
+
+    let mut ready_servers = Vec::with_capacity(servers.len());
+    for server in servers {
+        let channels = channel_repo.get_channels_for_server(&server.id).await?;
+        let ready_channels = channels
+            .into_iter()
+            .map(|c| ReadyChannel {
+                id: c.id,
+                server_id: c.server_id,
+                name: c.name,
+            })
+            .collect();
+
+        ready_servers.push(ReadyServer {
+            id: server.id,
+            name: server.name,
+            owner_user_id: server.owner_user_id,
+            channels: ready_channels,
+        });
+    }
+
+    Ok(ready_servers)
 }
 
 pub fn dispatch_subscribed_to_connection(

@@ -28,6 +28,14 @@ struct ServerResponse {
 }
 
 #[derive(Serialize)]
+struct ServerWithChannelsResponse {
+    id: Uuid,
+    name: String,
+    owner_user_id: Option<Uuid>,
+    channels: Vec<ChannelResponse>,
+}
+
+#[derive(Serialize)]
 struct ChannelResponse {
     id: Uuid,
     server_id: Uuid,
@@ -58,8 +66,10 @@ impl IntoResponse for ApiError {
 async fn list_servers(
     State(state): State<Arc<AppState>>,
     user: AuthenticatedUser,
-) -> Result<Json<Vec<ServerResponse>>, Response> {
+) -> Result<Json<Vec<ServerWithChannelsResponse>>, Response> {
     let servers = ServerRepository::new(&state.db);
+    let channels = ChannelRepository::new(&state.db);
+
     let user_servers = servers
         .get_servers_for_user(&user.user_id)
         .await
@@ -71,16 +81,35 @@ async fn list_servers(
             .into_response()
         })?;
 
-    Ok(Json(
-        user_servers
-            .into_iter()
-            .map(|s| ServerResponse {
-                id: s.id.0,
-                name: s.name,
-                owner_user_id: s.owner_user_id.map(|u| u.0),
-            })
-            .collect(),
-    ))
+    let mut result = Vec::with_capacity(user_servers.len());
+    for server in user_servers {
+        let server_channels = channels
+            .get_channels_for_server(&server.id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "Failed to list channels for server");
+                ApiError {
+                    error: "Internal error".to_string(),
+                }
+                .into_response()
+            })?;
+
+        result.push(ServerWithChannelsResponse {
+            id: server.id.0,
+            name: server.name,
+            owner_user_id: server.owner_user_id.map(|u| u.0),
+            channels: server_channels
+                .into_iter()
+                .map(|c| ChannelResponse {
+                    id: c.id.0,
+                    server_id: c.server_id.0,
+                    name: c.name,
+                })
+                .collect(),
+        });
+    }
+
+    Ok(Json(result))
 }
 
 async fn create_server(

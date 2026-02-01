@@ -99,7 +99,8 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             &result.user_id,
                             &username,
                             result.is_developer,
-                        );
+                        )
+                        .await;
                     }
                     Ok(GatewayPayload::Subscribe {}) => {
                         let Some(user_id) = require_identified(&state, &connection_id) else {

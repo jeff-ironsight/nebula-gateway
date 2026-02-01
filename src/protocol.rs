@@ -1,4 +1,4 @@
-use crate::types::{ChannelId, ConnectionId, Token, UserId};
+use crate::types::{ChannelId, ConnectionId, ServerId, Token, UserId};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -11,7 +11,6 @@ pub enum GatewayPayload {
     Identify {
         token: Token,
     },
-    /// Subscribe to all channels the user has access to.
     Subscribe {},
     MessageCreate {
         channel_id: ChannelId,
@@ -19,12 +18,10 @@ pub enum GatewayPayload {
     },
     Dispatch {
         t: String,
-        #[serde(flatten)]
         d: serde_json::Value,
     },
 }
 
-/// Event dispatched after successful subscription.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SubscribedEvent {
     pub channel_ids: Vec<ChannelId>,
@@ -41,12 +38,28 @@ pub struct MessageCreateEvent {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ReadyChannel {
+    pub id: ChannelId,
+    pub server_id: ServerId,
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ReadyServer {
+    pub id: ServerId,
+    pub name: String,
+    pub owner_user_id: Option<UserId>,
+    pub channels: Vec<ReadyChannel>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ReadyEvent {
     pub connection_id: ConnectionId,
     pub user_id: UserId,
     pub username: String,
     pub heartbeat_interval_ms: u64,
     pub is_developer: bool,
+    pub servers: Vec<ReadyServer>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +152,7 @@ mod tests {
             username: "test-user".into(),
             heartbeat_interval_ms: 25_000,
             is_developer: true,
+            servers: vec![],
         };
 
         let json = serde_json::to_string(&ready).unwrap();
@@ -148,5 +162,6 @@ mod tests {
         assert_eq!(parsed.username, ready.username);
         assert_eq!(parsed.heartbeat_interval_ms, ready.heartbeat_interval_ms);
         assert_eq!(parsed.is_developer, ready.is_developer);
+        assert_eq!(parsed.servers.len(), 0);
     }
 }
