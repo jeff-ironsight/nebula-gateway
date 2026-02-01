@@ -4,8 +4,13 @@ use std::sync::Arc;
 use crate::state::AppState;
 
 pub mod auth;
+mod channels;
 mod health;
+mod servers;
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().merge(health::router())
+    Router::new()
+        .merge(health::router())
+        .merge(servers::router())
+        .merge(channels::router())
 }
