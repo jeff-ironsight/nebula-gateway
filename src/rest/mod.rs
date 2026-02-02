@@ -6,6 +6,7 @@ use crate::state::AppState;
 pub mod auth;
 mod channels;
 mod health;
+mod messages;
 mod servers;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -13,4 +14,5 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(health::router())
         .merge(servers::router())
         .merge(channels::router())
+        .merge(messages::router())
 }
