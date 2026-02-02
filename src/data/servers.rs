@@ -47,6 +47,7 @@ impl<'a> ServerRepository<'a> {
         owner_user_id: &UserId,
     ) -> Result<ServerId, sqlx::Error> {
         let server_id = Uuid::new_v4();
+        let channel_id = Uuid::new_v4();
         let mut tx = self.pool.begin().await?;
 
         sqlx::query!(
@@ -66,6 +67,13 @@ impl<'a> ServerRepository<'a> {
         )
         .execute(&mut *tx)
         .await?;
+
+        // Create default "general" channel
+        sqlx::query("insert into channels (id, server_id, name) values ($1, $2, 'general')")
+            .bind(channel_id)
+            .bind(server_id)
+            .execute(&mut *tx)
+            .await?;
 
         tx.commit().await?;
         Ok(ServerId::from(server_id))
@@ -111,7 +119,7 @@ impl<'a> ServerRepository<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::UserRepository;
+    use crate::data::{ChannelRepository, UserRepository};
     use crate::state::test_db;
 
     #[tokio::test]
@@ -136,6 +144,32 @@ mod tests {
             .expect("check membership");
 
         assert!(is_member);
+    }
+
+    #[tokio::test]
+    async fn create_server_creates_general_channel() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+        let channels = ChannelRepository::new(&pool);
+
+        let user_id = users
+            .get_or_create_by_auth_sub("auth0|server-channel-test")
+            .await
+            .expect("create user");
+
+        let server_id = servers
+            .create_server("Test Server", &user_id)
+            .await
+            .expect("create server");
+
+        let server_channels = channels
+            .get_channels_for_server(&server_id)
+            .await
+            .expect("get channels");
+
+        assert_eq!(server_channels.len(), 1);
+        assert_eq!(server_channels[0].name, "general");
     }
 
     #[tokio::test]

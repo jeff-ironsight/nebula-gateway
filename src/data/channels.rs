@@ -161,10 +161,7 @@ mod tests {
             .await
             .expect("create server");
 
-        channels
-            .create_channel(&server_id, "general")
-            .await
-            .expect("create channel");
+        // "general" is auto-created by create_server, just add "random"
         channels
             .create_channel(&server_id, "random")
             .await

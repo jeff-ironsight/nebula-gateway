@@ -637,11 +637,10 @@ mod tests {
             .await
             .unwrap();
 
+        // "general" is auto-created by create_server
         let channels = ChannelRepository::new(&state.db);
-        let channel1 = channels
-            .create_channel(&server_id, "general")
-            .await
-            .unwrap();
+        let server_channels = channels.get_channels_for_server(&server_id).await.unwrap();
+        let channel1 = server_channels[0].id;
         let channel2 = channels.create_channel(&server_id, "random").await.unwrap();
 
         // Identify
@@ -753,11 +752,10 @@ mod tests {
             .await
             .unwrap();
 
+        // "general" is auto-created by create_server
         let channels = ChannelRepository::new(&state.db);
-        let channel_id = channels
-            .create_channel(&server_id, "general")
-            .await
-            .unwrap();
+        let server_channels = channels.get_channels_for_server(&server_id).await.unwrap();
+        let channel_id = server_channels[0].id;
 
         // Identify both
         identify_connection(

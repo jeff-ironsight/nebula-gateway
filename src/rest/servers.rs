@@ -25,13 +25,6 @@ struct ServerResponse {
     id: Uuid,
     name: String,
     owner_user_id: Option<Uuid>,
-}
-
-#[derive(Serialize)]
-struct ServerWithChannelsResponse {
-    id: Uuid,
-    name: String,
-    owner_user_id: Option<Uuid>,
     channels: Vec<ChannelResponse>,
 }
 
@@ -66,7 +59,7 @@ impl IntoResponse for ApiError {
 async fn list_servers(
     State(state): State<Arc<AppState>>,
     user: AuthenticatedUser,
-) -> Result<Json<Vec<ServerWithChannelsResponse>>, Response> {
+) -> Result<Json<Vec<ServerResponse>>, Response> {
     let servers = ServerRepository::new(&state.db);
     let channels = ChannelRepository::new(&state.db);
 
@@ -94,7 +87,7 @@ async fn list_servers(
                 .into_response()
             })?;
 
-        result.push(ServerWithChannelsResponse {
+        result.push(ServerResponse {
             id: server.id.0,
             name: server.name,
             owner_user_id: server.owner_user_id.map(|u| u.0),
@@ -136,10 +129,31 @@ async fn create_server(
             .into_response()
         })?;
 
+    // Fetch the auto-created channels
+    let channel_repo = ChannelRepository::new(&state.db);
+    let channels = channel_repo
+        .get_channels_for_server(&server_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to get channels for new server");
+            ApiError {
+                error: "Internal error".to_string(),
+            }
+            .into_response()
+        })?;
+
     Ok(Json(ServerResponse {
         id: server_id.0,
         name: request.name,
         owner_user_id: Some(user.user_id.0),
+        channels: channels
+            .into_iter()
+            .map(|c| ChannelResponse {
+                id: c.id.0,
+                server_id: c.server_id.0,
+                name: c.name,
+            })
+            .collect(),
     }))
 }
 
@@ -334,6 +348,10 @@ mod tests {
             .unwrap();
         let created: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(created["name"], "My Server");
+        // Should include the auto-created "general" channel
+        let channels = created["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0]["name"], "general");
 
         // List servers
         let list_request = Request::builder()
@@ -421,19 +439,20 @@ mod tests {
         let app = router().with_state(state.clone());
 
         // Create user and server with unique auth sub
+        // Note: create_server auto-creates a "general" channel
         let auth_sub = format!("auth0|create-channel-{}", Uuid::new_v4());
         let users = UserRepository::new(&state.db);
         let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
         let servers = ServerRepository::new(&state.db);
         let server_id = servers.create_server("My Server", &_user_id).await.unwrap();
 
-        // Create a channel
+        // Create another channel
         let create_request = Request::builder()
             .method("POST")
             .uri(format!("/servers/{}/channels", server_id.0))
             .header("Authorization", format!("Bearer {}", auth_sub))
             .header("Content-Type", "application/json")
-            .body(Body::from(r#"{"name": "general"}"#))
+            .body(Body::from(r#"{"name": "random"}"#))
             .unwrap();
 
         let response = app.clone().oneshot(create_request).await.unwrap();
@@ -443,9 +462,9 @@ mod tests {
             .await
             .unwrap();
         let created: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(created["name"], "general");
+        assert_eq!(created["name"], "random");
 
-        // List channels
+        // List channels - should have "general" (auto-created) + "random"
         let list_request = Request::builder()
             .method("GET")
             .uri(format!("/servers/{}/channels", server_id.0))
@@ -460,8 +479,9 @@ mod tests {
             .await
             .unwrap();
         let channels: Vec<Value> = serde_json::from_slice(&body).unwrap();
-        assert_eq!(channels.len(), 1);
+        assert_eq!(channels.len(), 2);
         assert_eq!(channels[0]["name"], "general");
+        assert_eq!(channels[1]["name"], "random");
     }
 
     #[tokio::test]
