@@ -6,6 +6,7 @@ pub struct Server {
     pub id: ServerId,
     pub name: String,
     pub owner_user_id: Option<UserId>,
+    pub my_role: String,
 }
 
 pub struct ServerRepository<'a> {
@@ -18,9 +19,9 @@ impl<'a> ServerRepository<'a> {
     }
 
     pub async fn get_servers_for_user(&self, user_id: &UserId) -> Result<Vec<Server>, sqlx::Error> {
-        let rows = sqlx::query_as::<_, (Uuid, String, Option<Uuid>)>(
+        let rows = sqlx::query_as::<_, (Uuid, String, Option<Uuid>, String)>(
             r#"
-            select s.id, s.name, s.owner_user_id
+            select s.id, s.name, s.owner_user_id, sm.role
             from servers s
             join server_members sm on sm.server_id = s.id
             where sm.user_id = $1
@@ -33,10 +34,11 @@ impl<'a> ServerRepository<'a> {
 
         Ok(rows
             .into_iter()
-            .map(|(id, name, owner_user_id)| Server {
+            .map(|(id, name, owner_user_id, my_role)| Server {
                 id: ServerId::from(id),
                 name,
                 owner_user_id: owner_user_id.map(UserId::from),
+                my_role,
             })
             .collect())
     }
@@ -112,6 +114,21 @@ impl<'a> ServerRepository<'a> {
         .bind(user_id.0)
         .fetch_one(self.pool)
         .await?;
+        Ok(exists)
+    }
+
+    pub async fn is_owner_or_admin(
+        &self,
+        server_id: &ServerId,
+        user_id: &UserId,
+    ) -> Result<bool, sqlx::Error> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "select exists(select 1 from server_members where server_id = $1 and user_id = $2 and role in ('owner', 'admin'))",
+        )
+            .bind(server_id.0)
+            .bind(user_id.0)
+            .fetch_one(self.pool)
+            .await?;
         Ok(exists)
     }
 }

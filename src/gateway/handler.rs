@@ -204,6 +204,7 @@ async fn fetch_user_servers_with_channels(
             id: server.id,
             name: server.name,
             owner_user_id: server.owner_user_id,
+            my_role: server.my_role,
             channels: ready_channels,
         });
     }

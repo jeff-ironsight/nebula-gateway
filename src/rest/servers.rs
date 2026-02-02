@@ -25,6 +25,7 @@ struct ServerResponse {
     id: Uuid,
     name: String,
     owner_user_id: Option<Uuid>,
+    my_role: String,
     channels: Vec<ChannelResponse>,
 }
 
@@ -91,6 +92,7 @@ async fn list_servers(
             id: server.id.0,
             name: server.name,
             owner_user_id: server.owner_user_id.map(|u| u.0),
+            my_role: server.my_role,
             channels: server_channels
                 .into_iter()
                 .map(|c| ChannelResponse {
@@ -146,6 +148,7 @@ async fn create_server(
         id: server_id.0,
         name: request.name,
         owner_user_id: Some(user.user_id.0),
+        my_role: "owner".to_string(),
         channels: channels
             .into_iter()
             .map(|c| ChannelResponse {
@@ -226,10 +229,10 @@ async fn create_channel(
         .into_response());
     }
 
-    // Verify user is member of server
+    // Verify user is owner or admin of server
     let servers = ServerRepository::new(&state.db);
-    let is_member = servers
-        .is_member(&server_id, &user.user_id)
+    let is_owner_or_admin = servers
+        .is_owner_or_admin(&server_id, &user.user_id)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to check server membership");
@@ -239,11 +242,11 @@ async fn create_channel(
             .into_response()
         })?;
 
-    if !is_member {
+    if !is_owner_or_admin {
         return Err((
             StatusCode::FORBIDDEN,
             Json(ApiError {
-                error: "Not a member of this server".to_string(),
+                error: "Not an owner or admin of this server".to_string(),
             }),
         )
             .into_response());
@@ -498,5 +501,63 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn create_channel_rejects_empty_name() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        // Create user and server with unique auth sub
+        let auth_sub = format!("auth0|reject-channel-empty-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers.create_server("My Server", &_user_id).await.unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/servers/{}/channels", server_id.0))
+            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"name": "   "}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn create_channel_only_for_server_admins_and_owners() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        // Create user and server with unique auth sub
+        let auth_sub = format!("auth0|non-admin-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers.create_server("My Server", &_user_id).await.unwrap();
+
+        // Create another user who is not an admin or owner
+        let other_auth_sub = format!("auth0|other-non-admin-{}", Uuid::new_v4());
+        let _other_user_id = users
+            .get_or_create_by_auth_sub(&other_auth_sub)
+            .await
+            .unwrap();
+
+        // Try to create a channel - should be forbidden
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/servers/{}/channels", server_id.0))
+            .header("Authorization", format!("Bearer {}", other_auth_sub))
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"name": "random"}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }

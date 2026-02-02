@@ -49,6 +49,7 @@ pub struct ReadyServer {
     pub id: ServerId,
     pub name: String,
     pub owner_user_id: Option<UserId>,
+    pub my_role: String,
     pub channels: Vec<ReadyChannel>,
 }
 
