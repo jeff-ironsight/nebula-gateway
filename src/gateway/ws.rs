@@ -167,12 +167,21 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
 
                         let username = {
                             let users = UserRepository::new(&state.db);
-                            users
-                                .get_username_by_id(&user_id)
-                                .await
-                                .ok()
-                                .flatten()
-                                .unwrap_or_default()
+                            users.get_username_by_id(&user_id).await.ok().flatten()
+                        };
+
+                        let Some(username) = username else {
+                            dispatch_error_to_connection(
+                                &state,
+                                &connection_id,
+                                ErrorCode::UsernameRequired,
+                            );
+                            debug!(
+                                ?connection_id,
+                                channel = %channel_id,
+                                "message create rejected; no username set"
+                            );
+                            continue;
                         };
 
                         broadcast_message_to_channel(
@@ -181,7 +190,8 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             &user_id,
                             &username,
                             &content,
-                        );
+                        )
+                        .await;
                     }
                     Ok(_other) => {
                         // Ignore unhandled payloads for now
@@ -366,10 +376,28 @@ mod tests {
     #[tokio::test]
     async fn broadcast_removes_stale_subscribers() {
         let state = Arc::new(AppState::new(test_db().await, None));
-        let channel_id = ChannelId::from(Uuid::new_v4());
+
+        // Create user, server, and channel in DB for message persistence
+        let users = crate::data::UserRepository::new(&state.db);
+        let active_user_id = users
+            .get_or_create_by_auth_sub("auth0|broadcast-stale-test")
+            .await
+            .unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Broadcast Test", &active_user_id)
+            .await
+            .unwrap();
+
+        let channels = ChannelRepository::new(&state.db);
+        let channel_id = channels
+            .create_channel(&server_id, "test-channel")
+            .await
+            .unwrap();
+
         let stale_connection = ConnectionId::from(Uuid::new_v4());
         let active_connection = ConnectionId::from(Uuid::new_v4());
-        let active_user_id = UserId::from(Uuid::new_v4());
 
         {
             let subscribers = state.channel_subscribers.entry(channel_id).or_default();
@@ -390,7 +418,8 @@ mod tests {
         let (tx, mut rx) = unbounded_channel();
         state.connections.insert(active_connection, tx);
 
-        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "active_user", "hello");
+        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "active_user", "hello")
+            .await;
 
         let message = rx.recv().await.unwrap();
         match message {
@@ -416,10 +445,28 @@ mod tests {
     #[tokio::test]
     async fn broadcast_removes_closed_senders() {
         let state = Arc::new(AppState::new(test_db().await, None));
-        let channel_id = ChannelId::from(Uuid::new_v4());
+
+        // Create user, server, and channel in DB for message persistence
+        let users = crate::data::UserRepository::new(&state.db);
+        let active_user_id = users
+            .get_or_create_by_auth_sub("auth0|broadcast-closed-test")
+            .await
+            .unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Broadcast Closed Test", &active_user_id)
+            .await
+            .unwrap();
+
+        let channels = ChannelRepository::new(&state.db);
+        let channel_id = channels
+            .create_channel(&server_id, "test-channel")
+            .await
+            .unwrap();
+
         let closed_connection = ConnectionId::from(Uuid::new_v4());
         let active_connection = ConnectionId::from(Uuid::new_v4());
-        let active_user_id = UserId::from(Uuid::new_v4());
 
         {
             let subscribers = state.channel_subscribers.entry(channel_id).or_default();
@@ -444,7 +491,8 @@ mod tests {
         let (active_tx, mut active_rx) = unbounded_channel();
         state.connections.insert(active_connection, active_tx);
 
-        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "active_user", "hello");
+        broadcast_message_to_channel(&state, &channel_id, &active_user_id, "active_user", "hello")
+            .await;
 
         let message = active_rx.recv().await.unwrap();
         match message {

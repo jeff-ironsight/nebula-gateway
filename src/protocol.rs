@@ -68,6 +68,7 @@ pub enum ErrorCode {
     NotIdentified,
     NotSubscribed,
     InvalidToken,
+    UsernameRequired,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

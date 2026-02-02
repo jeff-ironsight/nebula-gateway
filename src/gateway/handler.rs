@@ -1,5 +1,5 @@
 use crate::{
-    data::{ChannelRepository, ServerRepository},
+    data::{ChannelRepository, MessageRepository, ServerRepository},
     protocol::{
         ErrorCode, ErrorEvent, GatewayPayload, MessageCreateEvent, ReadyChannel, ReadyEvent,
         ReadyServer, SubscribedEvent,
@@ -47,7 +47,7 @@ pub fn subscribe_to_channels(
     }
 }
 
-pub fn broadcast_message_to_channel(
+pub async fn broadcast_message_to_channel(
     state: &Arc<AppState>,
     channel_id: &ChannelId,
     author_user_id: &UserId,
@@ -62,13 +62,26 @@ pub fn broadcast_message_to_channel(
     let subscriber_ids: Vec<ConnectionId> = subscribers.iter().map(|id| *id).collect();
     drop(subscribers);
 
+    let message_id = Ulid::new();
+    let timestamp = Utc::now();
+
+    // Persist message before broadcasting
+    let messages = MessageRepository::new(&state.db);
+    if let Err(e) = messages
+        .create(&message_id.to_string(), channel_id, author_user_id, content)
+        .await
+    {
+        warn!(channel = %channel_id, error = %e, "failed to persist message");
+        return;
+    }
+
     let event = MessageCreateEvent {
-        id: Ulid::new(),
+        id: message_id,
         channel_id: *channel_id,
         author_user_id: *author_user_id,
         author_username: author_username.to_string(),
         content: content.to_string(),
-        timestamp: Utc::now().to_rfc3339(),
+        timestamp: timestamp.to_rfc3339(),
     };
     let payload = GatewayPayload::Dispatch {
         t: "MESSAGE_CREATE".into(),

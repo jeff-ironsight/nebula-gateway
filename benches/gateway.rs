@@ -38,8 +38,9 @@ fn bench_payload_serde(c: &mut Criterion) {
 fn bench_broadcast_message(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
 
-    {
-        let _guard = runtime.enter();
+    // Note: This benchmark requires a running PostgreSQL for message persistence.
+    // Without a DB, the broadcast will fail silently and skip broadcasting.
+    let (state, channel_id, author_id, mut receivers) = runtime.block_on(async {
         let db = PgPoolOptions::new()
             .connect_lazy("postgres://postgres:postgres@127.0.0.1/postgres")
             .expect("create lazy pool");
@@ -57,25 +58,26 @@ fn bench_broadcast_message(c: &mut Criterion) {
             receivers.push(rx);
         }
 
-        c.bench_function("broadcast_message/100_members", |b| {
-            b.iter(|| {
-                broadcast_message_to_channel(
-                    black_box(&state),
-                    black_box(&channel_id),
-                    black_box(&author_id),
-                    black_box("bench-user"),
-                    black_box("hello benchmark"),
-                );
-                for rx in receivers.iter_mut() {
-                    while rx.try_recv().is_ok() {}
-                }
-            });
+        (state, channel_id, author_id, receivers)
+    });
+
+    c.bench_function("broadcast_message/100_members", |b| {
+        b.iter(|| {
+            runtime.block_on(broadcast_message_to_channel(
+                black_box(&state),
+                black_box(&channel_id),
+                black_box(&author_id),
+                black_box("bench-user"),
+                black_box("hello benchmark"),
+            ));
+            for rx in receivers.iter_mut() {
+                while rx.try_recv().is_ok() {}
+            }
         });
+    });
 
-        drop(receivers);
-        drop(state);
-    }
-
+    drop(receivers);
+    drop(state);
     runtime.shutdown_timeout(Duration::from_secs(1));
 }
 
