@@ -77,6 +77,14 @@ pub struct ErrorEvent {
     pub code: ErrorCode,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MemberJoinEvent {
+    pub server_id: ServerId,
+    pub user_id: UserId,
+    pub username: Option<String>,
+    pub joined_at: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
