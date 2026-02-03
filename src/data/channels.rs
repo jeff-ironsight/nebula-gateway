@@ -1,4 +1,4 @@
-use crate::types::{ChannelId, ServerId};
+use crate::types::{ChannelId, ChannelType, ServerId};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -9,6 +9,7 @@ pub struct Channel {
     pub id: ChannelId,
     pub server_id: ServerId,
     pub name: String,
+    pub channel_type: ChannelType,
 }
 
 pub struct ChannelRepository<'a> {
@@ -24,9 +25,9 @@ impl<'a> ChannelRepository<'a> {
         &self,
         server_id: &ServerId,
     ) -> Result<Vec<Channel>, sqlx::Error> {
-        let rows = sqlx::query_as::<_, (Uuid, Uuid, String)>(
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, ChannelType)>(
             r#"
-            select id, server_id, name
+            select id, server_id, name, type
             from channels
             where server_id = $1
             order by name
@@ -38,10 +39,11 @@ impl<'a> ChannelRepository<'a> {
 
         Ok(rows
             .into_iter()
-            .map(|(id, server_id, name)| Channel {
+            .map(|(id, server_id, name, channel_type)| Channel {
                 id: ChannelId::from(id),
                 server_id: ServerId::from(server_id),
                 name,
+                channel_type,
             })
             .collect())
     }
@@ -64,17 +66,18 @@ impl<'a> ChannelRepository<'a> {
     }
 
     pub async fn get_by_id(&self, channel_id: &ChannelId) -> Result<Option<Channel>, sqlx::Error> {
-        let row = sqlx::query_as::<_, (Uuid, Uuid, String)>(
-            "select id, server_id, name from channels where id = $1",
+        let row = sqlx::query_as::<_, (Uuid, Uuid, String, ChannelType)>(
+            "select id, server_id, name, type from channels where id = $1",
         )
         .bind(channel_id.0)
         .fetch_optional(self.pool)
         .await?;
 
-        Ok(row.map(|(id, server_id, name)| Channel {
+        Ok(row.map(|(id, server_id, name, channel_type)| Channel {
             id: ChannelId::from(id),
             server_id: ServerId::from(server_id),
             name,
+            channel_type,
         }))
     }
 
@@ -82,9 +85,9 @@ impl<'a> ChannelRepository<'a> {
         &self,
         user_id: &crate::types::UserId,
     ) -> Result<Vec<Channel>, sqlx::Error> {
-        let rows = sqlx::query_as::<_, (Uuid, Uuid, String)>(
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, ChannelType)>(
             r#"
-            select c.id, c.server_id, c.name
+            select c.id, c.server_id, c.name, c.type
             from channels c
             join server_members sm on sm.server_id = c.server_id
             where sm.user_id = $1
@@ -97,10 +100,40 @@ impl<'a> ChannelRepository<'a> {
 
         Ok(rows
             .into_iter()
-            .map(|(id, server_id, name)| Channel {
+            .map(|(id, server_id, name, channel_type)| Channel {
                 id: ChannelId::from(id),
                 server_id: ServerId::from(server_id),
                 name,
+                channel_type,
+            })
+            .collect())
+    }
+
+    /// Get only text channels for a user (used for message subscriptions)
+    pub async fn get_text_channels_for_user(
+        &self,
+        user_id: &crate::types::UserId,
+    ) -> Result<Vec<Channel>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, ChannelType)>(
+            r#"
+            select c.id, c.server_id, c.name, c.type
+            from channels c
+            join server_members sm on sm.server_id = c.server_id
+            where sm.user_id = $1 and c.type = 'text'
+            order by c.name
+            "#,
+        )
+        .bind(user_id.0)
+        .fetch_all(self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, server_id, name, channel_type)| Channel {
+                id: ChannelId::from(id),
+                server_id: ServerId::from(server_id),
+                name,
+                channel_type,
             })
             .collect())
     }

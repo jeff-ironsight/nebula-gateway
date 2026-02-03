@@ -113,8 +113,12 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             continue;
                         };
 
+                        // Only subscribe to text channels (voice channels use a different flow)
                         let channels = ChannelRepository::new(&state.db);
-                        let user_channels = match channels.get_channels_for_user(&user_id).await {
+                        let text_channels = match channels
+                            .get_text_channels_for_user(&user_id)
+                            .await
+                        {
                             Ok(channels) => channels,
                             Err(e) => {
                                 warn!(?connection_id, error = %e, "failed to get user channels");
@@ -122,15 +126,15 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket) -> Result<(), Er
                             }
                         };
 
-                        let channel_ids: Vec<_> = user_channels.iter().map(|c| c.id).collect();
+                        let channel_ids: Vec<_> = text_channels.iter().map(|c| c.id).collect();
 
                         subscribe_to_channels(&state, &channel_ids, connection_id);
                         dispatch_subscribed_to_connection(&state, &connection_id, channel_ids);
 
                         info!(
                             ?connection_id,
-                            channels = user_channels.len(),
-                            "subscribed to all user channels"
+                            channels = text_channels.len(),
+                            "subscribed to text channels"
                         );
                     }
                     Ok(GatewayPayload::MessageCreate {

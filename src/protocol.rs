@@ -1,4 +1,4 @@
-use crate::types::{ChannelId, ConnectionId, ServerId, Token, UserId};
+use crate::types::{ChannelId, ChannelType, ConnectionId, ServerId, Token, UserId};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -42,6 +42,7 @@ pub struct ReadyChannel {
     pub id: ChannelId,
     pub server_id: ServerId,
     pub name: String,
+    pub channel_type: ChannelType,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

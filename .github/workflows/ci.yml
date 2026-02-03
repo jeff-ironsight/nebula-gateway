@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  COVERAGE_IGNORE_REGEX: src/main.rs|src/types.rs
 
 jobs:
   ci:
@@ -28,7 +29,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
 
       # Cache cargo registry/git and build artifacts to speed up CI
       - name: Cache cargo
@@ -65,3 +66,17 @@ jobs:
       # Lint and fail the build on warnings
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage (llvm-cov)
+        run: cargo llvm-cov --workspace --all-features --ignore-filename-regex "$COVERAGE_IGNORE_REGEX" --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

@@ -4,6 +4,14 @@ use std::fmt;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "channel_type", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum ChannelType {
+    Text,
+    Voice,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ChannelId(pub Uuid);

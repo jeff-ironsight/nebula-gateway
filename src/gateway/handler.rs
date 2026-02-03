@@ -197,6 +197,7 @@ async fn fetch_user_servers_with_channels(
                 id: c.id,
                 server_id: c.server_id,
                 name: c.name,
+                channel_type: c.channel_type,
             })
             .collect();
 
@@ -297,10 +298,10 @@ pub async fn dispatch_member_join_to_server(
         // Check if this user is a member of the server
         match servers.is_member(server_id, &session.user_id).await {
             Ok(true) => {
-                if let Some(tx) = state.connections.get(&connection_id) {
-                    if tx.send(text_msg(&payload)).is_err() {
-                        warn!(?connection_id, "failed to send member join payload");
-                    }
+                if let Some(tx) = state.connections.get(&connection_id)
+                    && tx.send(text_msg(&payload)).is_err()
+                {
+                    warn!(?connection_id, "failed to send member join payload");
                 }
             }
             Ok(false) => {}

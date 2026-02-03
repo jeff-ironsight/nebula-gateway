@@ -49,5 +49,4 @@ large-scale realtime systems in Rust.
 
 #### Reports:
 
-- Benchmarks: https://jeff-ironsight.github.io/nebula-gateway/bench/
 - Coverage: https://jeff-ironsight.github.io/nebula-gateway/coverage/
