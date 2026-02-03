@@ -66,3 +66,43 @@ pub type OutboundTx = mpsc::UnboundedSender<Message>;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct Token(pub String);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct InviteId(pub Uuid);
+
+impl From<Uuid> for InviteId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for InviteId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct InviteCode(pub String);
+
+impl InviteCode {
+    /// Generates a new random 8-character alphanumeric invite code.
+    /// Excludes ambiguous characters (0, O, 1, l, I) for readability.
+    pub fn generate() -> Self {
+        use rand::Rng;
+        const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+        let mut rng = rand::rng();
+        let code: String = (0..8)
+            .map(|_| CHARSET[rng.random_range(0..CHARSET.len())] as char)
+            .collect();
+        Self(code)
+    }
+}
+
+impl fmt::Display for InviteCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
