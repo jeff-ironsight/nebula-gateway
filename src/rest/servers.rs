@@ -5,7 +5,7 @@ use crate::types::ServerId;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{delete, get};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use uuid::Uuid;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/servers", get(list_servers).post(create_server))
+        .route("/servers/{id}", delete(delete_server))
         .route(
             "/servers/{id}/channels",
             get(list_channels).post(create_channel),
@@ -158,6 +159,47 @@ async fn create_server(
             })
             .collect(),
     }))
+}
+
+async fn delete_server(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+    Path(server_id): Path<Uuid>,
+) -> Result<StatusCode, Response> {
+    let server_id = ServerId::from(server_id);
+
+    // Verify user is owner of server
+    let servers = ServerRepository::new(&state.db);
+    let is_owner = servers
+        .is_owner(&server_id, &user.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to check server ownership");
+            ApiError {
+                error: "Internal error".to_string(),
+            }
+            .into_response()
+        })?;
+
+    if !is_owner {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ApiError {
+                error: "Not the owner of this server".to_string(),
+            }),
+        )
+            .into_response());
+    }
+
+    servers.delete_server(&server_id).await.map_err(|e| {
+        tracing::error!(error = %e, "Failed to delete server");
+        ApiError {
+            error: "Internal error".to_string(),
+        }
+        .into_response()
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn list_channels(

@@ -81,6 +81,13 @@ impl<'a> ServerRepository<'a> {
         Ok(ServerId::from(server_id))
     }
 
+    pub async fn delete_server(&self, server_id: &ServerId) -> Result<(), sqlx::Error> {
+        sqlx::query!("delete from servers where id = $1", server_id.0)
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn add_member(
         &self,
         server_id: &ServerId,
@@ -124,6 +131,21 @@ impl<'a> ServerRepository<'a> {
     ) -> Result<bool, sqlx::Error> {
         let exists = sqlx::query_scalar::<_, bool>(
             "select exists(select 1 from server_members where server_id = $1 and user_id = $2 and role in ('owner', 'admin'))",
+        )
+            .bind(server_id.0)
+            .bind(user_id.0)
+            .fetch_one(self.pool)
+            .await?;
+        Ok(exists)
+    }
+
+    pub async fn is_owner(
+        &self,
+        server_id: &ServerId,
+        user_id: &UserId,
+    ) -> Result<bool, sqlx::Error> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "select exists(select 1 from server_members where server_id = $1 and user_id = $2 and role = 'owner')",
         )
             .bind(server_id.0)
             .bind(user_id.0)
