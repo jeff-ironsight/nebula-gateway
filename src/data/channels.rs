@@ -104,6 +104,14 @@ impl<'a> ChannelRepository<'a> {
             })
             .collect())
     }
+
+    pub async fn delete_channel(&self, channel_id: &ChannelId) -> Result<(), sqlx::Error> {
+        sqlx::query("delete from channels where id = $1")
+            .bind(channel_id.0)
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

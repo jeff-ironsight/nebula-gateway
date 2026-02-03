@@ -12,7 +12,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/channels/{id}", get(get_channel))
+    Router::new().route("/channels/{id}", get(get_channel).delete(delete_channel))
 }
 
 #[derive(Serialize)]
@@ -89,6 +89,68 @@ async fn get_channel(
         server_id: channel.server_id.0,
         name: channel.name,
     }))
+}
+
+async fn delete_channel(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+    Path(channel_id): Path<Uuid>,
+) -> Result<StatusCode, Response> {
+    let channel_id = ChannelId::from(channel_id);
+    let channels = ChannelRepository::new(&state.db);
+
+    let channel = channels
+        .get_by_id(&channel_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to get channel for deletion");
+            ApiError {
+                error: "Internal error".to_string(),
+            }
+            .into_response()
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ApiError {
+                    error: "Channel not found".to_string(),
+                }),
+            )
+                .into_response()
+        })?;
+
+    // Verify user is owner or admin of the channel's server
+    let servers = ServerRepository::new(&state.db);
+    let is_owner_or_admin = servers
+        .is_owner_or_admin(&channel.server_id, &user.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to check server membership");
+            ApiError {
+                error: "Internal error".to_string(),
+            }
+            .into_response()
+        })?;
+
+    if !is_owner_or_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ApiError {
+                error: "Not an owner or admin of this server".to_string(),
+            }),
+        )
+            .into_response());
+    }
+
+    channels.delete_channel(&channel_id).await.map_err(|e| {
+        tracing::error!(error = %e, "Failed to delete channel");
+        ApiError {
+            error: "Internal error".to_string(),
+        }
+        .into_response()
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]
