@@ -17,11 +17,15 @@ check:
 	cargo clippy --all-targets --all-features --fix --allow-dirty && \
 	cargo audit && \
 	cargo test --all-features --lib
+
+[group('LINT')]
 lint:
 	just migrate-up && \
 	cargo fmt --all && \
 	cargo clippy --all-targets --all-features --fix --allow-dirty && \
 	cargo audit
+
+[group('LINT')]
 fmt:
 	cargo fmt --all && \
 	cargo clippy --all-targets --all-features --fix --allow-dirty
@@ -52,9 +56,11 @@ bench:
 release:
 	cargo build --release
 
+[group('BUILD')]
 debug:
 	RUST_LOG=debug cargo run
 
+[group('BUILD')]
 run:
 	cargo run
 
@@ -73,6 +79,7 @@ git-force:
 
 alias yeet := git-force
 
+[group('GIT')]
 git-fixup hash:
 	git add --all && \
 	git commit --fixup='{{ hash }}' && \
@@ -84,9 +91,11 @@ alias fixup := git-fixup
 migrate-up:
 	DATABASE_URL={{ DATABASE_URL }} sqlx migrate run
 
+[group('MIGRATE')]
 migrate name:
 	DATABASE_URL={{ DATABASE_URL }} sqlx migrate add {{ name }}
 
+[group('MIGRATE')]
 prepare:
 	cargo sqlx prepare
 
