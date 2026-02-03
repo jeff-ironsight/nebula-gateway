@@ -61,7 +61,11 @@ fn bench_broadcast_message(c: &mut Criterion) {
         (state, channel_id, author_id, receivers)
     });
 
-    c.bench_function("broadcast_message/100_members", |b| {
+    let mut group = c.benchmark_group("broadcast_message");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(10));
+
+    group.bench_function("100_members", |b| {
         b.iter(|| {
             runtime.block_on(broadcast_message_to_channel(
                 black_box(&state),
@@ -75,6 +79,7 @@ fn bench_broadcast_message(c: &mut Criterion) {
             }
         });
     });
+    group.finish();
 
     drop(receivers);
     drop(state);
