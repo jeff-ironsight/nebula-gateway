@@ -1,7 +1,7 @@
 use crate::data::{ChannelRepository, ServerRepository};
 use crate::rest::auth::AuthenticatedUser;
 use crate::state::AppState;
-use crate::types::ServerId;
+use crate::types::{ChannelType, ServerId};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -35,6 +35,7 @@ struct ChannelResponse {
     id: Uuid,
     server_id: Uuid,
     name: String,
+    channel_type: ChannelType,
 }
 
 #[derive(Deserialize)]
@@ -100,6 +101,7 @@ async fn list_servers(
                     id: c.id.0,
                     server_id: c.server_id.0,
                     name: c.name,
+                    channel_type: c.channel_type,
                 })
                 .collect(),
         });
@@ -156,6 +158,7 @@ async fn create_server(
                 id: c.id.0,
                 server_id: c.server_id.0,
                 name: c.name,
+                channel_type: c.channel_type,
             })
             .collect(),
     }))
@@ -251,6 +254,7 @@ async fn list_channels(
                 id: c.id.0,
                 server_id: c.server_id.0,
                 name: c.name,
+                channel_type: c.channel_type,
             })
             .collect(),
     ))
@@ -310,6 +314,7 @@ async fn create_channel(
         id: channel_id.0,
         server_id: server_id.0,
         name: request.name,
+        channel_type: ChannelType::Text,
     }))
 }
 
