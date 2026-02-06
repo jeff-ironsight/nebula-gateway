@@ -22,20 +22,20 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 #[derive(Serialize)]
-struct ServerResponse {
-    id: Uuid,
-    name: String,
-    owner_user_id: Option<Uuid>,
-    my_role: String,
-    channels: Vec<ChannelResponse>,
+pub(crate) struct ServerResponse {
+    pub(crate) id: Uuid,
+    pub(crate) name: String,
+    pub(crate) owner_user_id: Option<Uuid>,
+    pub(crate) my_role: String,
+    pub(crate) channels: Vec<ChannelResponse>,
 }
 
 #[derive(Serialize)]
-struct ChannelResponse {
-    id: Uuid,
-    server_id: Uuid,
-    name: String,
-    channel_type: ChannelType,
+pub(crate) struct ChannelResponse {
+    pub(crate) id: Uuid,
+    pub(crate) server_id: Uuid,
+    pub(crate) name: String,
+    pub(crate) channel_type: ChannelType,
 }
 
 #[derive(Deserialize)]

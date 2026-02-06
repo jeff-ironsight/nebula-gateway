@@ -43,6 +43,32 @@ impl<'a> ServerRepository<'a> {
             .collect())
     }
 
+    pub async fn get_server_for_user(
+        &self,
+        server_id: &ServerId,
+        user_id: &UserId,
+    ) -> Result<Option<Server>, sqlx::Error> {
+        let row = sqlx::query_as::<_, (Uuid, String, Option<Uuid>, String)>(
+            r#"
+            select s.id, s.name, s.owner_user_id, sm.role
+            from servers s
+            join server_members sm on sm.server_id = s.id
+            where sm.user_id = $1 and s.id = $2
+            "#,
+        )
+        .bind(user_id.0)
+        .bind(server_id.0)
+        .fetch_optional(self.pool)
+        .await?;
+
+        Ok(row.map(|(id, name, owner_user_id, my_role)| Server {
+            id: ServerId::from(id),
+            name,
+            owner_user_id: owner_user_id.map(UserId::from),
+            my_role,
+        }))
+    }
+
     pub async fn create_server(
         &self,
         name: &str,
@@ -236,6 +262,48 @@ mod tests {
         assert_eq!(user_servers.len(), 2);
         assert!(user_servers.iter().any(|s| s.name == "My Server"));
         assert!(user_servers.iter().any(|s| s.name == "Nebula"));
+    }
+
+    #[tokio::test]
+    async fn get_server_for_user_returns_only_member_server() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+
+        let owner_id = users
+            .get_or_create_by_auth_sub("auth0|get-server-owner")
+            .await
+            .expect("create user");
+        let member_id = users
+            .get_or_create_by_auth_sub("auth0|get-server-member")
+            .await
+            .expect("create user");
+        let other_id = users
+            .get_or_create_by_auth_sub("auth0|get-server-other")
+            .await
+            .expect("create user");
+
+        let server_id = servers
+            .create_server("Target Server", &owner_id)
+            .await
+            .expect("create server");
+
+        servers
+            .add_member(&server_id, &member_id, "member")
+            .await
+            .expect("add member");
+
+        let member_server = servers
+            .get_server_for_user(&server_id, &member_id)
+            .await
+            .expect("get server");
+        assert!(member_server.is_some());
+
+        let non_member = servers
+            .get_server_for_user(&server_id, &other_id)
+            .await
+            .expect("get server");
+        assert!(non_member.is_none());
     }
 
     #[tokio::test]

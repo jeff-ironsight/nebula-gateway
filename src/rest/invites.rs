@@ -1,8 +1,9 @@
-use crate::data::{InviteRepository, ServerRepository};
+use crate::data::{ChannelRepository, InviteRepository, ServerRepository};
 use crate::gateway::handler::dispatch_member_join_to_server;
 use crate::rest::auth::AuthenticatedUser;
+use crate::rest::servers::{ChannelResponse, ServerResponse};
 use crate::state::AppState;
-use crate::types::ServerId;
+use crate::types::{ServerId, UserId};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -50,6 +51,7 @@ struct InvitePreviewResponse {
 struct UseInviteResponse {
     server_id: Uuid,
     already_member: bool,
+    server: Option<ServerResponse>,
 }
 
 #[derive(Serialize)]
@@ -61,6 +63,63 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (StatusCode::BAD_REQUEST, Json(self)).into_response()
     }
+}
+
+async fn build_server_response(
+    state: &AppState,
+    server_id: &ServerId,
+    user_id: &UserId,
+) -> Result<ServerResponse, Response> {
+    let servers = ServerRepository::new(&state.db);
+    let channels = ChannelRepository::new(&state.db);
+
+    let server = servers
+        .get_server_for_user(server_id, user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to get server");
+            ApiError {
+                error: "Internal error".to_string(),
+            }
+            .into_response()
+        })?;
+
+    let Some(server) = server else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                error: "Server not found".to_string(),
+            }),
+        )
+            .into_response());
+    };
+
+    let server_channels = channels
+        .get_channels_for_server(server_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to list channels for server");
+            ApiError {
+                error: "Internal error".to_string(),
+            }
+            .into_response()
+        })?;
+
+    Ok(ServerResponse {
+        id: server.id.0,
+        name: server.name,
+        owner_user_id: server.owner_user_id.map(|u| u.0),
+        my_role: server.my_role,
+        channels: server_channels
+            .into_iter()
+            .map(|c| ChannelResponse {
+                id: c.id.0,
+                server_id: c.server_id.0,
+                name: c.name,
+                channel_type: c.channel_type,
+            })
+            .collect(),
+    })
 }
 
 async fn create_invite(
@@ -214,9 +273,16 @@ async fn use_invite(
         dispatch_member_join_to_server(&state, &joined_server_id, &user.user_id).await;
     }
 
+    let server = if was_already_member {
+        None
+    } else {
+        Some(build_server_response(&state, &joined_server_id, &user.user_id).await?)
+    };
+
     Ok(Json(UseInviteResponse {
         server_id: joined_server_id.0,
         already_member: was_already_member,
+        server,
     }))
 }
 
@@ -374,7 +440,7 @@ mod tests {
             .unwrap();
         let invite: Value = serde_json::from_slice(&body).unwrap();
 
-        assert!(invite["code"].as_str().unwrap().len() == 8);
+        assert_eq!(invite["code"].as_str().unwrap().len(), 8);
         assert_eq!(invite["max_uses"], 5);
         assert_eq!(invite["use_count"], 0);
     }
@@ -512,7 +578,7 @@ mod tests {
         // Joiner uses invite
         let request = Request::builder()
             .method("POST")
-            .uri(format!("/invites/{}/use", invite.code.0))
+            .uri(format!("/invites/{}", invite.code.0))
             .header("Authorization", format!("Bearer {}", joiner_sub))
             .body(Body::empty())
             .unwrap();
@@ -526,6 +592,13 @@ mod tests {
         let result: Value = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(result["already_member"], false);
+        assert!(result["server"].is_object());
+        assert_eq!(result["server"]["id"], server_id.0.to_string());
+        assert_eq!(result["server"]["my_role"], "member");
+        assert_eq!(result["server"]["owner_user_id"], owner_id.0.to_string());
+        let channels = result["server"]["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0]["name"], "general");
 
         // Verify membership
         let is_member = servers.is_member(&server_id, &joiner_id).await.unwrap();
@@ -559,7 +632,7 @@ mod tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri(format!("/invites/{}/use", invite.code.0))
+            .uri(format!("/invites/{}", invite.code.0))
             .header("Authorization", format!("Bearer {}", joiner_sub))
             .body(Body::empty())
             .unwrap();
@@ -709,7 +782,7 @@ mod tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri(format!("/invites/{}/use", Uuid::new_v4()))
+            .uri(format!("/invites/{}", Uuid::new_v4()))
             .header("Authorization", format!("Bearer {}", auth_sub))
             .body(Body::empty())
             .unwrap();
@@ -726,7 +799,7 @@ mod tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri(format!("/invites/{}/use", Uuid::new_v4()))
+            .uri(format!("/invites/{}", Uuid::new_v4()))
             .body(Body::empty())
             .unwrap();
 
@@ -762,7 +835,7 @@ mod tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri(format!("/invites/{}/use", invite.code.0))
+            .uri(format!("/invites/{}", invite.code.0))
             .header("Authorization", format!("Bearer {}", joiner_sub))
             .body(Body::empty())
             .unwrap();
@@ -772,7 +845,7 @@ mod tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri(format!("/invites/{}/use", invite.code.0))
+            .uri(format!("/invites/{}", invite.code.0))
             .header("Authorization", format!("Bearer {}", other_sub))
             .body(Body::empty())
             .unwrap();
@@ -812,7 +885,7 @@ mod tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri(format!("/invites/{}/use", invite.code.0))
+            .uri(format!("/invites/{}", invite.code.0))
             .header("Authorization", format!("Bearer {}", member_sub))
             .body(Body::empty())
             .unwrap();
@@ -826,6 +899,7 @@ mod tests {
         let result: Value = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(result["already_member"], true);
+        assert!(result["server"].is_null());
     }
 
     #[tokio::test]
