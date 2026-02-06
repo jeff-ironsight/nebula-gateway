@@ -382,7 +382,7 @@ mod tests {
         let state = Arc::new(AppState::new(test_db().await, None));
 
         // Create user, server, and channel in DB for message persistence
-        let users = crate::data::UserRepository::new(&state.db);
+        let users = UserRepository::new(&state.db);
         let active_user_id = users
             .get_or_create_by_auth_sub("auth0|broadcast-stale-test")
             .await
@@ -451,7 +451,7 @@ mod tests {
         let state = Arc::new(AppState::new(test_db().await, None));
 
         // Create user, server, and channel in DB for message persistence
-        let users = crate::data::UserRepository::new(&state.db);
+        let users = UserRepository::new(&state.db);
         let active_user_id = users
             .get_or_create_by_auth_sub("auth0|broadcast-closed-test")
             .await
@@ -668,7 +668,7 @@ mod tests {
             GatewayPayload::Dispatch { t, d } => {
                 assert_eq!(t, "SUBSCRIBED");
                 let channel_ids: Vec<ChannelId> =
-                    serde_json::from_value(d.get("channel_ids").unwrap().clone()).unwrap();
+                    from_value(d.get("channel_ids").unwrap().clone()).unwrap();
                 // User has default server channel + 2 created channels
                 assert!(channel_ids.contains(&channel1));
                 assert!(channel_ids.contains(&channel2));
