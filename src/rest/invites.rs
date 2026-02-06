@@ -16,8 +16,10 @@ use uuid::Uuid;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/servers/{id}/invites", post(create_invite))
-        .route("/invites/{code}", get(preview_invite).delete(revoke_invite))
-        .route("/invites/{code}/use", post(use_invite))
+        .route(
+            "/invites/{code}",
+            get(preview_invite).delete(revoke_invite).post(use_invite),
+        )
 }
 
 #[derive(Deserialize)]
