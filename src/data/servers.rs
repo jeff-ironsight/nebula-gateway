@@ -237,4 +237,135 @@ mod tests {
         assert!(user_servers.iter().any(|s| s.name == "My Server"));
         assert!(user_servers.iter().any(|s| s.name == "Nebula"));
     }
+
+    #[tokio::test]
+    async fn add_member_is_idempotent() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+
+        let owner_id = users
+            .get_or_create_by_auth_sub("auth0|add-member-owner")
+            .await
+            .expect("create user");
+        let member_id = users
+            .get_or_create_by_auth_sub("auth0|add-member-user")
+            .await
+            .expect("create user");
+
+        let server_id = servers
+            .create_server("Add Member Server", &owner_id)
+            .await
+            .expect("create server");
+
+        servers
+            .add_member(&server_id, &member_id, "member")
+            .await
+            .expect("add member");
+        servers
+            .add_member(&server_id, &member_id, "member")
+            .await
+            .expect("add member again");
+
+        let is_member = servers
+            .is_member(&server_id, &member_id)
+            .await
+            .expect("check membership");
+        assert!(is_member);
+    }
+
+    #[tokio::test]
+    async fn is_owner_or_admin_and_is_owner_work() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+
+        let owner_id = users
+            .get_or_create_by_auth_sub("auth0|owner-check")
+            .await
+            .expect("create user");
+        let admin_id = users
+            .get_or_create_by_auth_sub("auth0|admin-check")
+            .await
+            .expect("create user");
+        let member_id = users
+            .get_or_create_by_auth_sub("auth0|member-check")
+            .await
+            .expect("create user");
+
+        let server_id = servers
+            .create_server("Role Server", &owner_id)
+            .await
+            .expect("create server");
+
+        servers
+            .add_member(&server_id, &admin_id, "admin")
+            .await
+            .expect("add admin");
+        servers
+            .add_member(&server_id, &member_id, "member")
+            .await
+            .expect("add member");
+
+        assert!(
+            servers
+                .is_owner_or_admin(&server_id, &owner_id)
+                .await
+                .expect("owner or admin")
+        );
+        assert!(
+            servers
+                .is_owner_or_admin(&server_id, &admin_id)
+                .await
+                .expect("owner or admin")
+        );
+        assert!(
+            !servers
+                .is_owner_or_admin(&server_id, &member_id)
+                .await
+                .expect("owner or admin")
+        );
+
+        assert!(
+            servers
+                .is_owner(&server_id, &owner_id)
+                .await
+                .expect("owner")
+        );
+        assert!(
+            !servers
+                .is_owner(&server_id, &admin_id)
+                .await
+                .expect("owner")
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_server_removes_server() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+
+        let owner_id = users
+            .get_or_create_by_auth_sub("auth0|delete-server")
+            .await
+            .expect("create user");
+
+        let server_id = servers
+            .create_server("Delete Server", &owner_id)
+            .await
+            .expect("create server");
+
+        servers
+            .delete_server(&server_id)
+            .await
+            .expect("delete server");
+
+        let remaining = servers
+            .get_servers_for_user(&owner_id)
+            .await
+            .expect("get servers");
+
+        assert!(!remaining.iter().any(|s| s.id == server_id));
+    }
 }

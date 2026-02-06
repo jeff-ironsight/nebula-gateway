@@ -378,6 +378,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_invite_sets_expiration_when_requested() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let auth_sub = format!("auth0|invite-exp-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers.create_server("Exp Server", &user_id).await.unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/servers/{}/invites", server_id.0))
+            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"expires_in_hours": 1}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let invite: Value = serde_json::from_slice(&body).unwrap();
+
+        assert!(invite["expires_at"].is_string());
+    }
+
+    #[tokio::test]
     async fn preview_invite_is_public() {
         let pool = test_db().await;
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
@@ -416,6 +448,39 @@ mod tests {
 
         assert_eq!(preview["server_name"], "Preview Server");
         assert_eq!(preview["member_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn preview_invite_returns_404_when_expired() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let auth_sub = format!("auth0|preview-expired-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Expired Preview Server", &user_id)
+            .await
+            .unwrap();
+
+        let invites = InviteRepository::new(&state.db);
+        let expired_at = Utc::now() - Duration::hours(1);
+        let invite = invites
+            .create(&server_id, &user_id, None, Some(expired_at))
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/invites/{}", invite.code.0))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -466,6 +531,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn use_invite_returns_400_when_expired() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|use-exp-owner-{}", Uuid::new_v4());
+        let joiner_sub = format!("auth0|use-exp-joiner-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+        let _joiner_id = users.get_or_create_by_auth_sub(&joiner_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Expired Use Server", &owner_id)
+            .await
+            .unwrap();
+
+        let invites = InviteRepository::new(&state.db);
+        let expired_at = Utc::now() - Duration::hours(1);
+        let invite = invites
+            .create(&server_id, &owner_id, None, Some(expired_at))
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/invites/{}/use", invite.code.0))
+            .header("Authorization", format!("Bearer {}", joiner_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn revoke_invite_requires_creator_or_admin() {
         let pool = test_db().await;
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
@@ -510,5 +611,239 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn revoke_invite_allows_admin_when_not_creator() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|revoke-admin-owner-{}", Uuid::new_v4());
+        let creator_sub = format!("auth0|revoke-admin-creator-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+        let creator_id = users.get_or_create_by_auth_sub(&creator_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Revoke Admin Server", &owner_id)
+            .await
+            .unwrap();
+        servers
+            .add_member(&server_id, &creator_id, "member")
+            .await
+            .unwrap();
+
+        let invites = InviteRepository::new(&state.db);
+        let invite = invites
+            .create(&server_id, &creator_id, None, None)
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/invites/{}", invite.code.0))
+            .header("Authorization", format!("Bearer {}", owner_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn preview_invite_returns_404_when_missing() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/invites/{}", Uuid::new_v4()))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn create_invite_returns_401_for_unauthenticated() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let auth_sub = format!("auth0|invite-unauth-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Unauth Server", &user_id)
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/servers/{}/invites", server_id.0))
+            .header("Content-Type", "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn use_invite_returns_404_when_missing() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let auth_sub = format!("auth0|use-missing-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/invites/{}/use", Uuid::new_v4()))
+            .header("Authorization", format!("Bearer {}", auth_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn use_invite_returns_401_for_unauthenticated() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/invites/{}/use", Uuid::new_v4()))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn use_invite_returns_400_when_max_uses_exceeded() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|use-max-owner-{}", Uuid::new_v4());
+        let joiner_sub = format!("auth0|use-max-joiner-{}", Uuid::new_v4());
+        let other_sub = format!("auth0|use-max-other-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+        let _joiner_id = users.get_or_create_by_auth_sub(&joiner_sub).await.unwrap();
+        let _other_id = users.get_or_create_by_auth_sub(&other_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Max Uses Server", &owner_id)
+            .await
+            .unwrap();
+
+        let invites = InviteRepository::new(&state.db);
+        let invite = invites
+            .create(&server_id, &owner_id, Some(1), None)
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/invites/{}/use", invite.code.0))
+            .header("Authorization", format!("Bearer {}", joiner_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/invites/{}/use", invite.code.0))
+            .header("Authorization", format!("Bearer {}", other_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn use_invite_sets_already_member_true() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|use-member-owner-{}", Uuid::new_v4());
+        let member_sub = format!("auth0|use-member-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+        let member_id = users.get_or_create_by_auth_sub(&member_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Member Server", &owner_id)
+            .await
+            .unwrap();
+
+        servers
+            .add_member(&server_id, &member_id, "member")
+            .await
+            .unwrap();
+
+        let invites = InviteRepository::new(&state.db);
+        let invite = invites
+            .create(&server_id, &owner_id, None, None)
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/invites/{}/use", invite.code.0))
+            .header("Authorization", format!("Bearer {}", member_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let result: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(result["already_member"], true);
+    }
+
+    #[tokio::test]
+    async fn revoke_invite_returns_404_when_missing() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let auth_sub = format!("auth0|revoke-missing-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/invites/{}", Uuid::new_v4()))
+            .header("Authorization", format!("Bearer {}", auth_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

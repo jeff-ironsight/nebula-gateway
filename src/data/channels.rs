@@ -217,4 +217,122 @@ mod tests {
         assert_eq!(server_channels[0].name, "general");
         assert_eq!(server_channels[1].name, "random");
     }
+
+    #[tokio::test]
+    async fn get_by_id_returns_none_for_missing() {
+        let pool = test_db().await;
+        let channels = ChannelRepository::new(&pool);
+
+        let missing = channels
+            .get_by_id(&ChannelId::from(Uuid::new_v4()))
+            .await
+            .expect("get channel");
+
+        assert!(missing.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_channels_for_user_returns_member_channels() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+        let channels = ChannelRepository::new(&pool);
+
+        let user_id = users
+            .get_or_create_by_auth_sub("auth0|channels-user-test")
+            .await
+            .expect("create user");
+
+        let server_id = servers
+            .create_server("Member Server", &user_id)
+            .await
+            .expect("create server");
+
+        channels
+            .create_channel(&server_id, "alpha")
+            .await
+            .expect("create channel");
+
+        let user_channels = channels
+            .get_channels_for_user(&user_id)
+            .await
+            .expect("get channels");
+
+        assert!(user_channels.iter().any(|c| c.name == "alpha"));
+        assert!(user_channels.iter().any(|c| c.name == "general"));
+    }
+
+    #[tokio::test]
+    async fn get_text_channels_for_user_filters_voice() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+        let channels = ChannelRepository::new(&pool);
+
+        let user_id = users
+            .get_or_create_by_auth_sub("auth0|channels-text-test")
+            .await
+            .expect("create user");
+
+        let server_id = servers
+            .create_server("Text Server", &user_id)
+            .await
+            .expect("create server");
+
+        channels
+            .create_channel(&server_id, "text-room")
+            .await
+            .expect("create channel");
+
+        let voice_id = Uuid::new_v4();
+        sqlx::query(
+            "insert into channels (id, server_id, name, type) values ($1, $2, $3, 'voice')",
+        )
+        .bind(voice_id)
+        .bind(server_id.0)
+        .bind("voice-room")
+        .execute(&pool)
+        .await
+        .expect("create voice channel");
+
+        let text_channels = channels
+            .get_text_channels_for_user(&user_id)
+            .await
+            .expect("get text channels");
+
+        assert!(text_channels.iter().any(|c| c.name == "text-room"));
+        assert!(!text_channels.iter().any(|c| c.name == "voice-room"));
+    }
+
+    #[tokio::test]
+    async fn delete_channel_removes_channel() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+        let channels = ChannelRepository::new(&pool);
+
+        let user_id = users
+            .get_or_create_by_auth_sub("auth0|channels-delete-test")
+            .await
+            .expect("create user");
+
+        let server_id = servers
+            .create_server("Delete Server", &user_id)
+            .await
+            .expect("create server");
+
+        let channel_id = channels
+            .create_channel(&server_id, "delete-me")
+            .await
+            .expect("create channel");
+
+        channels
+            .delete_channel(&channel_id)
+            .await
+            .expect("delete channel");
+
+        let deleted = channels.get_by_id(&channel_id).await.expect("get channel");
+
+        assert!(deleted.is_none());
+    }
 }

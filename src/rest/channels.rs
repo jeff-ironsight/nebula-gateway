@@ -306,4 +306,115 @@ mod tests {
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
+
+    #[tokio::test]
+    async fn delete_channel_returns_204_for_owner() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|delete-owner-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Delete Server", &owner_id)
+            .await
+            .unwrap();
+
+        let channels = ChannelRepository::new(&state.db);
+        let channel_id = channels
+            .create_channel(&server_id, "to-delete")
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/channels/{}", channel_id.0))
+            .header("Authorization", format!("Bearer {}", owner_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let deleted = channels.get_by_id(&channel_id).await.unwrap();
+        assert!(deleted.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_channel_returns_403_for_non_admin() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|delete-owner-{}", Uuid::new_v4());
+        let other_sub = format!("auth0|delete-other-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+        let _other_id = users.get_or_create_by_auth_sub(&other_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Delete Server", &owner_id)
+            .await
+            .unwrap();
+
+        let channels = ChannelRepository::new(&state.db);
+        let channel_id = channels
+            .create_channel(&server_id, "keep-me")
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/channels/{}", channel_id.0))
+            .header("Authorization", format!("Bearer {}", other_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let still_there = channels.get_by_id(&channel_id).await.unwrap();
+        assert!(still_there.is_some());
+    }
+
+    #[tokio::test]
+    async fn delete_channel_returns_404_for_missing() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let auth_sub = format!("auth0|delete-missing-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/channels/{}", Uuid::new_v4()))
+            .header("Authorization", format!("Bearer {}", auth_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_channel_returns_401_for_unauthenticated() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state);
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/channels/{}", Uuid::new_v4()))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
 }

@@ -322,7 +322,7 @@ async fn create_channel(
 mod tests {
     use super::*;
     use crate::auth0::{Auth0Settings, Auth0Verifier};
-    use crate::data::UserRepository;
+    use crate::data::{ChannelRepository, UserRepository};
     use crate::state::test_db;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -606,5 +606,136 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn delete_server_returns_204_for_owner() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|delete-owner-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers.create_server("Delete Me", &owner_id).await.unwrap();
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/servers/{}", server_id.0))
+            .header("Authorization", format!("Bearer {}", owner_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn delete_server_returns_403_for_non_owner() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|delete-owner-{}", Uuid::new_v4());
+        let other_sub = format!("auth0|delete-other-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+        let _other_id = users.get_or_create_by_auth_sub(&other_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Protected Server", &owner_id)
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/servers/{}", server_id.0))
+            .header("Authorization", format!("Bearer {}", other_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn list_channels_returns_channels_for_member() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|channels-owner-{}", Uuid::new_v4());
+        let member_sub = format!("auth0|channels-member-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+        let member_id = users.get_or_create_by_auth_sub(&member_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Member Server", &owner_id)
+            .await
+            .unwrap();
+        servers
+            .add_member(&server_id, &member_id, "member")
+            .await
+            .unwrap();
+
+        let channels = ChannelRepository::new(&state.db);
+        channels.create_channel(&server_id, "random").await.unwrap();
+
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/servers/{}/channels", server_id.0))
+            .header("Authorization", format!("Bearer {}", member_sub))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let channels: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(channels.len(), 2);
+        assert!(channels.iter().any(|c| c["name"] == "general"));
+        assert!(channels.iter().any(|c| c["name"] == "random"));
+    }
+
+    #[tokio::test]
+    async fn create_channel_allows_admin() {
+        let pool = test_db().await;
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|admin-owner-{}", Uuid::new_v4());
+        let admin_sub = format!("auth0|admin-user-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+        let admin_id = users.get_or_create_by_auth_sub(&admin_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Admin Server", &owner_id)
+            .await
+            .unwrap();
+        servers
+            .add_member(&server_id, &admin_id, "admin")
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/servers/{}/channels", server_id.0))
+            .header("Authorization", format!("Bearer {}", admin_sub))
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"name": "ops"}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }
