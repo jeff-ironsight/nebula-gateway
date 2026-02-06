@@ -37,36 +37,65 @@ impl<'a> InviteRepository<'a> {
         max_uses: Option<i32>,
         expires_at: Option<DateTime<Utc>>,
     ) -> Result<Invite, sqlx::Error> {
-        let id = Uuid::new_v4();
-        let code = InviteCode::generate();
+        self.create_with_optional_code(server_id, creator_id, max_uses, expires_at, None)
+            .await
+    }
 
-        let row = sqlx::query_as::<
-            _,
-            (
-                Uuid,
-                String,
-                Uuid,
-                Uuid,
-                Option<i32>,
-                i32,
-                Option<DateTime<Utc>>,
-                DateTime<Utc>,
-            ),
-        >(
-            r#"
-            insert into server_invites (id, code, server_id, creator_id, max_uses, expires_at)
-            values ($1, $2, $3, $4, $5, $6)
-            returning id, code, server_id, creator_id, max_uses, use_count, expires_at, created_at
-            "#,
-        )
-        .bind(id)
-        .bind(&code.0)
-        .bind(server_id.0)
-        .bind(creator_id.0)
-        .bind(max_uses)
-        .bind(expires_at)
-        .fetch_one(self.pool)
-        .await?;
+    async fn create_with_optional_code(
+        &self,
+        server_id: &ServerId,
+        creator_id: &UserId,
+        max_uses: Option<i32>,
+        expires_at: Option<DateTime<Utc>>,
+        mut initial_code: Option<InviteCode>,
+    ) -> Result<Invite, sqlx::Error> {
+        // Retry on unique-constraint collisions for invite codes.
+        const MAX_ATTEMPTS: usize = 10;
+        let mut attempt = 0;
+
+        let row = loop {
+            attempt += 1;
+            let id = Uuid::new_v4();
+            let code = initial_code.take().unwrap_or_else(InviteCode::generate);
+
+            let result = sqlx::query_as::<
+                _,
+                (
+                    Uuid,
+                    String,
+                    Uuid,
+                    Uuid,
+                    Option<i32>,
+                    i32,
+                    Option<DateTime<Utc>>,
+                    DateTime<Utc>,
+                ),
+            >(
+                r#"
+                insert into server_invites (id, code, server_id, creator_id, max_uses, expires_at)
+                values ($1, $2, $3, $4, $5, $6)
+                returning id, code, server_id, creator_id, max_uses, use_count, expires_at, created_at
+                "#,
+            )
+                .bind(id)
+                .bind(&code.0)
+                .bind(server_id.0)
+                .bind(creator_id.0)
+                .bind(max_uses)
+                .bind(expires_at)
+                .fetch_one(self.pool)
+                .await;
+
+            match result {
+                Ok(row) => break row,
+                Err(sqlx::Error::Database(db_err))
+                    if db_err.code().as_deref() == Some("23505") && attempt < MAX_ATTEMPTS =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        };
 
         Ok(Invite {
             id: InviteId::from(row.0),
@@ -280,6 +309,37 @@ mod tests {
         assert!(invite.max_uses.is_none());
         assert!(invite.expires_at.is_none());
         assert_eq!(invite.use_count, 0);
+    }
+
+    #[tokio::test]
+    async fn create_invite_retries_on_code_collision() {
+        let pool = test_db().await;
+        let users = UserRepository::new(&pool);
+        let servers = ServerRepository::new(&pool);
+        let invites = InviteRepository::new(&pool);
+
+        let user_id = users
+            .get_or_create_by_auth_sub("auth0|invite-test-collision")
+            .await
+            .expect("create user");
+        let server_id = servers
+            .create_server("Test Server", &user_id)
+            .await
+            .expect("create server");
+
+        let fixed = InviteCode("ABCDEFGH".to_string());
+        let first = invites
+            .create_with_optional_code(&server_id, &user_id, None, None, Some(fixed.clone()))
+            .await
+            .expect("create invite with fixed code");
+        assert_eq!(first.code, fixed);
+
+        let second = invites
+            .create_with_optional_code(&server_id, &user_id, None, None, Some(fixed.clone()))
+            .await
+            .expect("create invite with collision");
+
+        assert_ne!(second.code, fixed);
     }
 
     #[tokio::test]
