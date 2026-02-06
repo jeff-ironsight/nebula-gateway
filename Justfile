@@ -1,11 +1,9 @@
 #!/usr/bin/env just --justfile
 
 set positional-arguments := true
-set dotenv-required := true
-set dotenv-load := true
 
-DATABASE_URL := env("DATABASE_URL")
-COVERAGE_IGNORE_REGEX := env("COVERAGE_IGNORE_REGEX")
+DATABASE_URL := "postgres://root:rootpass@localhost:5432/nebuladb"
+COVERAGE_IGNORE_REGEX := "src/main.rs|src/types.rs"
 
 _default:
     @just --list
@@ -43,7 +41,6 @@ dev:
 	cargo install cargo-nextest --locked
 	cargo install sqlx-cli --locked --no-default-features --features postgres
 	brew install gnuplot
-	test -f .env || cp .env.example .env
 
 # Coverage report (macOS open).
 [group('TEST')]
