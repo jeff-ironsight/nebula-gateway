@@ -1,4 +1,4 @@
-use crate::types::{ChannelId, ChannelType, ServerId};
+use crate::types::{ChannelId, ChannelType, ServerId, UserId};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -17,7 +17,7 @@ pub struct ChannelRepository<'a> {
 }
 
 impl<'a> ChannelRepository<'a> {
-    pub fn new(pool: &'a PgPool) -> Self {
+    pub const fn new(pool: &'a PgPool) -> Self {
         Self { pool }
     }
 
@@ -26,12 +26,12 @@ impl<'a> ChannelRepository<'a> {
         server_id: &ServerId,
     ) -> Result<Vec<Channel>, sqlx::Error> {
         let rows = sqlx::query_as::<_, (Uuid, Uuid, String, ChannelType)>(
-            r#"
+            r"
             select id, server_id, name, type
             from channels
             where server_id = $1
             order by name
-            "#,
+            ",
         )
         .bind(server_id.0)
         .fetch_all(self.pool)
@@ -83,16 +83,16 @@ impl<'a> ChannelRepository<'a> {
 
     pub async fn get_channels_for_user(
         &self,
-        user_id: &crate::types::UserId,
+        user_id: &UserId,
     ) -> Result<Vec<Channel>, sqlx::Error> {
         let rows = sqlx::query_as::<_, (Uuid, Uuid, String, ChannelType)>(
-            r#"
+            r"
             select c.id, c.server_id, c.name, c.type
             from channels c
             join server_members sm on sm.server_id = c.server_id
             where sm.user_id = $1
             order by c.name
-            "#,
+            ",
         )
         .bind(user_id.0)
         .fetch_all(self.pool)
@@ -112,16 +112,16 @@ impl<'a> ChannelRepository<'a> {
     /// Get only text channels for a user (used for message subscriptions)
     pub async fn get_text_channels_for_user(
         &self,
-        user_id: &crate::types::UserId,
+        user_id: &UserId,
     ) -> Result<Vec<Channel>, sqlx::Error> {
         let rows = sqlx::query_as::<_, (Uuid, Uuid, String, ChannelType)>(
-            r#"
+            r"
             select c.id, c.server_id, c.name, c.type
             from channels c
             join server_members sm on sm.server_id = c.server_id
             where sm.user_id = $1 and c.type = 'text'
             order by c.name
-            "#,
+            ",
         )
         .bind(user_id.0)
         .fetch_all(self.pool)

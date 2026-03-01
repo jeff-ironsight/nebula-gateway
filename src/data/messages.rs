@@ -16,7 +16,7 @@ pub struct MessageRepository<'a> {
 }
 
 impl<'a> MessageRepository<'a> {
-    pub fn new(pool: &'a PgPool) -> Self {
+    pub const fn new(pool: &'a PgPool) -> Self {
         Self { pool }
     }
 
@@ -28,10 +28,10 @@ impl<'a> MessageRepository<'a> {
         content: &str,
     ) -> Result<(), sqlx::Error> {
         sqlx::query!(
-            r#"
+            r"
             insert into messages (id, channel_id, author_user_id, content)
             values ($1, $2, $3, $4)
-            "#,
+            ",
             id,
             channel_id.0,
             author_user_id.0,
@@ -61,7 +61,7 @@ impl<'a> MessageRepository<'a> {
                         DateTime<Utc>,
                     ),
                 >(
-                    r#"
+                    r"
                     select m.id, m.channel_id, m.author_user_id, u.username, m.content, m.created_at
                     from messages m
                     join users u on u.id = m.author_user_id
@@ -69,7 +69,7 @@ impl<'a> MessageRepository<'a> {
                       and m.created_at < (select created_at from messages where id = $2)
                     order by m.created_at desc
                     limit $3
-                    "#,
+                    ",
                 )
                 .bind(channel_id.0)
                 .bind(before_id)
@@ -89,14 +89,14 @@ impl<'a> MessageRepository<'a> {
                         DateTime<Utc>,
                     ),
                 >(
-                    r#"
+                    r"
                     select m.id, m.channel_id, m.author_user_id, u.username, m.content, m.created_at
                     from messages m
                     join users u on u.id = m.author_user_id
                     where m.channel_id = $1
                     order by m.created_at desc
                     limit $2
-                    "#,
+                    ",
                 )
                 .bind(channel_id.0)
                 .bind(limit)
@@ -200,10 +200,10 @@ mod tests {
         for i in 1..=5 {
             messages
                 .create(
-                    &format!("01HPAGE{:03}", i),
+                    &format!("01HPAGE{i:03}"),
                     &channel_id,
                     &user_id,
-                    &format!("Message {}", i),
+                    &format!("Message {i}"),
                 )
                 .await
                 .expect("create message");

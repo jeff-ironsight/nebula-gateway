@@ -26,7 +26,7 @@ pub struct InviteRepository<'a> {
 }
 
 impl<'a> InviteRepository<'a> {
-    pub fn new(pool: &'a PgPool) -> Self {
+    pub const fn new(pool: &'a PgPool) -> Self {
         Self { pool }
     }
 
@@ -71,11 +71,11 @@ impl<'a> InviteRepository<'a> {
                     DateTime<Utc>,
                 ),
             >(
-                r#"
+                r"
                 insert into server_invites (id, code, server_id, creator_id, max_uses, expires_at)
                 values ($1, $2, $3, $4, $5, $6)
                 returning id, code, server_id, creator_id, max_uses, use_count, expires_at, created_at
-                "#,
+                ",
             )
                 .bind(id)
                 .bind(&code.0)
@@ -89,10 +89,7 @@ impl<'a> InviteRepository<'a> {
             match result {
                 Ok(row) => break row,
                 Err(sqlx::Error::Database(db_err))
-                    if db_err.code().as_deref() == Some("23505") && attempt < MAX_ATTEMPTS =>
-                {
-                    continue;
-                }
+                    if db_err.code().as_deref() == Some("23505") && attempt < MAX_ATTEMPTS => {}
                 Err(e) => return Err(e),
             }
         };
@@ -123,11 +120,11 @@ impl<'a> InviteRepository<'a> {
                 DateTime<Utc>,
             ),
         >(
-            r#"
+            r"
             select id, code, server_id, creator_id, max_uses, use_count, expires_at, created_at
             from server_invites
             where code = $1
-            "#,
+            ",
         )
         .bind(code)
         .fetch_optional(self.pool)
@@ -147,7 +144,7 @@ impl<'a> InviteRepository<'a> {
 
     pub async fn get_preview(&self, code: &str) -> Result<Option<InvitePreview>, sqlx::Error> {
         let row = sqlx::query_as::<_, (String, Uuid, String, i64)>(
-            r#"
+            r"
             select i.code, s.id, s.name, count(sm.user_id) as member_count
             from server_invites i
             join servers s on s.id = i.server_id
@@ -156,7 +153,7 @@ impl<'a> InviteRepository<'a> {
               and (i.expires_at is null or i.expires_at > now())
               and (i.max_uses is null or i.use_count < i.max_uses)
             group by i.code, s.id, s.name
-            "#,
+            ",
         )
         .bind(code)
         .fetch_optional(self.pool)
@@ -170,7 +167,6 @@ impl<'a> InviteRepository<'a> {
         }))
     }
 
-    /// Use an invite to join a server. Returns the server ID if successful, None if invalid/expired/used up.
     pub async fn use_invite(
         &self,
         code: &str,
@@ -180,12 +176,12 @@ impl<'a> InviteRepository<'a> {
 
         // Lock and validate the invite
         let invite = sqlx::query_as::<_, (Uuid, i32, Option<i32>, Option<DateTime<Utc>>)>(
-            r#"
+            r"
             select server_id, use_count, max_uses, expires_at
             from server_invites
             where code = $1
             for update
-            "#,
+            ",
         )
         .bind(code)
         .fetch_optional(&mut *tx)

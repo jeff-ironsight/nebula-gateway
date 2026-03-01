@@ -15,7 +15,16 @@ check:
 	cargo fmt --all && \
 	cargo clippy --all-targets --all-features --fix --allow-dirty && \
 	cargo audit && \
-	cargo test --all-features --lib
+	just test
+
+# Strict lint + test check suitable for CI (no auto-fix, fails on any warning).
+[group('LINT')]
+ci:
+	just migrate-up && \
+	cargo fmt --all -- --check && \
+	cargo clippy --all-targets --all-features -- -D warnings && \
+	cargo audit && \
+	just test
 
 # Run lint-only checks.
 [group('LINT')]
@@ -24,6 +33,11 @@ lint:
 	cargo fmt --all && \
 	cargo clippy --all-targets --all-features --fix --allow-dirty && \
 	cargo audit
+
+# Check for outdated dependencies.
+[group('LINT')]
+outdated:
+	cargo outdated --exit-code 1
 
 # Format and clippy (no tests).
 [group('LINT')]
@@ -41,6 +55,19 @@ dev:
 	cargo install cargo-nextest --locked
 	cargo install sqlx-cli --locked --no-default-features --features postgres
 	brew install gnuplot
+
+# Run tests. Note: nextest is incompatible with this project's test infrastructure,
+# which uses a process-local OnceCell to share a single Postgres container across
+# all tests. Nextest runs each test in its own process, so it would spin up one
+# container per test instead of sharing one.
+[group('TEST')]
+test:
+	cargo test --all-features --lib
+
+# Open generated rustdoc.
+[group('TEST')]
+doc:
+	cargo doc --no-deps --open
 
 # Coverage report (macOS open).
 [group('TEST')]

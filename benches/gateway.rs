@@ -35,6 +35,10 @@ fn bench_payload_serde(c: &mut Criterion) {
     group.finish();
 }
 
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "group.finish() consumes the group"
+)]
 fn bench_broadcast_message(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
 
@@ -74,7 +78,7 @@ fn bench_broadcast_message(c: &mut Criterion) {
                 black_box("bench-user"),
                 black_box("hello benchmark"),
             ));
-            for rx in receivers.iter_mut() {
+            for rx in &mut receivers {
                 while rx.try_recv().is_ok() {}
             }
         });

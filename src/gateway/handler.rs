@@ -95,25 +95,22 @@ pub async fn broadcast_message_to_channel(
     let mut stale_subscribers = Vec::new();
 
     for subscriber_id in subscriber_ids {
-        match state.connections.get(&subscriber_id) {
-            Some(tx) => {
-                if tx.send(text_msg(&payload).clone()).is_err() {
-                    warn!(
-                        ?subscriber_id,
-                        channel = %channel_id,
-                        "failed to send message payload"
-                    );
-                    stale_subscribers.push(subscriber_id);
-                }
-            }
-            None => {
-                debug!(
+        if let Some(tx) = state.connections.get(&subscriber_id) {
+            if tx.send(text_msg(&payload)).is_err() {
+                warn!(
                     ?subscriber_id,
                     channel = %channel_id,
-                    "removing stale channel subscriber missing connection"
+                    "failed to send message payload"
                 );
                 stale_subscribers.push(subscriber_id);
             }
+        } else {
+            debug!(
+                ?subscriber_id,
+                channel = %channel_id,
+                "removing stale channel subscriber missing connection"
+            );
+            stale_subscribers.push(subscriber_id);
         }
     }
 
@@ -259,7 +256,7 @@ pub fn dispatch_error_to_connection(
     }
 }
 
-/// Dispatch MEMBER_JOIN event to all connections that are members of the server
+/// Dispatch `MEMBER_JOIN` event to all connections that are members of the server
 pub async fn dispatch_member_join_to_server(
     state: &Arc<AppState>,
     server_id: &crate::types::ServerId,
@@ -267,13 +264,13 @@ pub async fn dispatch_member_join_to_server(
 ) {
     // Get username for the new member
     let users = UserRepository::new(&state.db);
-    let username = match users.get_username_by_id(new_user_id).await {
-        Ok(name) => name,
-        Err(e) => {
+    let username = users
+        .get_username_by_id(new_user_id)
+        .await
+        .unwrap_or_else(|e| {
             warn!(error = %e, "Failed to get username for member join event");
             None
-        }
-    };
+        });
 
     let event = MemberJoinEvent {
         server_id: *server_id,
@@ -291,7 +288,7 @@ pub async fn dispatch_member_join_to_server(
     let servers = ServerRepository::new(&state.db);
 
     // Iterate through all active sessions to find server members
-    for session_entry in state.sessions.iter() {
+    for session_entry in &state.sessions {
         let connection_id = *session_entry.key();
         let session = *session_entry.value();
 
@@ -316,7 +313,7 @@ pub fn cleanup_connection(state: &Arc<AppState>, connection_id: &ConnectionId) {
     state.connections.remove(connection_id);
     state.sessions.remove(connection_id);
     if let Some((_, channels)) = state.connection_channels.remove(connection_id) {
-        for channel_id in channels.into_iter() {
+        for channel_id in channels {
             remove_channel_subscription(state, &channel_id, connection_id);
         }
     }
@@ -330,8 +327,7 @@ pub fn is_subscribed_to_channel(
     state
         .connection_channels
         .get(&connection_id)
-        .map(|set| set.contains(channel_id))
-        .unwrap_or(false)
+        .is_some_and(|set| set.contains(channel_id))
 }
 
 fn remove_channel_subscription(

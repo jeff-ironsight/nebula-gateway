@@ -200,7 +200,7 @@ mod tests {
         let request = Request::builder()
             .method("GET")
             .uri(format!("/channels/{}", channel_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -228,8 +228,8 @@ mod tests {
         let fake_channel_id = Uuid::new_v4();
         let request = Request::builder()
             .method("GET")
-            .uri(format!("/channels/{}", fake_channel_id))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .uri(format!("/channels/{fake_channel_id}"))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -277,7 +277,7 @@ mod tests {
         let request = Request::builder()
             .method("GET")
             .uri(format!("/channels/{}", channel_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -332,7 +332,7 @@ mod tests {
         let request = Request::builder()
             .method("DELETE")
             .uri(format!("/channels/{}", channel_id.0))
-            .header("Authorization", format!("Bearer {}", owner_sub))
+            .header("Authorization", format!("Bearer {owner_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -370,7 +370,7 @@ mod tests {
         let request = Request::builder()
             .method("DELETE")
             .uri(format!("/channels/{}", channel_id.0))
-            .header("Authorization", format!("Bearer {}", other_sub))
+            .header("Authorization", format!("Bearer {other_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -394,7 +394,7 @@ mod tests {
         let request = Request::builder()
             .method("DELETE")
             .uri(format!("/channels/{}", Uuid::new_v4()))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 

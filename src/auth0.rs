@@ -66,7 +66,7 @@ pub struct Auth0Claims {
 
 impl Auth0Claims {
     pub fn is_developer(&self) -> bool {
-        self.app.as_ref().map(|a| a.is_developer).unwrap_or(false)
+        self.app.as_ref().is_some_and(|a| a.is_developer)
     }
 }
 
@@ -186,11 +186,13 @@ impl Auth0Verifier {
             }
         }
 
-        let mut cache = self.jwks_cache.write().await;
-        *cache = Some(CachedJwks {
-            fetched_at: Instant::now(),
-            keys,
-        });
+        {
+            let mut cache = self.jwks_cache.write().await;
+            *cache = Some(CachedJwks {
+                fetched_at: Instant::now(),
+                keys,
+            });
+        }
 
         Ok(())
     }

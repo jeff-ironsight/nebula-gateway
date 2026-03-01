@@ -33,7 +33,7 @@ impl fmt::Display for ChannelId {
 pub struct ServerId(pub Uuid);
 
 /// Well-known UUID for the default "Nebula" server that all users auto-join.
-/// Matches the seed migration in 202601310002_seed_default_server.sql.
+/// Matches the seed migration in `202601310002_seed_default_server.sql`.
 pub const DEFAULT_SERVER_ID: ServerId =
     ServerId(Uuid::from_u128(0x00000000_0000_0000_0000_000000000001));
 

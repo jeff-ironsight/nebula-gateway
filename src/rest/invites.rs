@@ -402,7 +402,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/servers/{}/invites", server_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .header("Content-Type", "application/json")
             .body(Body::from("{}"))
             .unwrap();
@@ -427,7 +427,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/servers/{}/invites", server_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"max_uses": 5}"#))
             .unwrap();
@@ -461,7 +461,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/servers/{}/invites", server_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"expires_in_hours": 1}"#))
             .unwrap();
@@ -579,7 +579,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/invites/{}", invite.code.0))
-            .header("Authorization", format!("Bearer {}", joiner_sub))
+            .header("Authorization", format!("Bearer {joiner_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -633,7 +633,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/invites/{}", invite.code.0))
-            .header("Authorization", format!("Bearer {}", joiner_sub))
+            .header("Authorization", format!("Bearer {joiner_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -669,7 +669,7 @@ mod tests {
         let request = Request::builder()
             .method("DELETE")
             .uri(format!("/invites/{}", invite.code.0))
-            .header("Authorization", format!("Bearer {}", other_sub))
+            .header("Authorization", format!("Bearer {other_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -680,7 +680,7 @@ mod tests {
         let request = Request::builder()
             .method("DELETE")
             .uri(format!("/invites/{}", invite.code.0))
-            .header("Authorization", format!("Bearer {}", owner_sub))
+            .header("Authorization", format!("Bearer {owner_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -719,7 +719,7 @@ mod tests {
         let request = Request::builder()
             .method("DELETE")
             .uri(format!("/invites/{}", invite.code.0))
-            .header("Authorization", format!("Bearer {}", owner_sub))
+            .header("Authorization", format!("Bearer {owner_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -783,7 +783,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/invites/{}", Uuid::new_v4()))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -836,7 +836,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/invites/{}", invite.code.0))
-            .header("Authorization", format!("Bearer {}", joiner_sub))
+            .header("Authorization", format!("Bearer {joiner_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -846,7 +846,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/invites/{}", invite.code.0))
-            .header("Authorization", format!("Bearer {}", other_sub))
+            .header("Authorization", format!("Bearer {other_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -886,7 +886,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/invites/{}", invite.code.0))
-            .header("Authorization", format!("Bearer {}", member_sub))
+            .header("Authorization", format!("Bearer {member_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -915,7 +915,7 @@ mod tests {
         let request = Request::builder()
             .method("DELETE")
             .uri(format!("/invites/{}", Uuid::new_v4()))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 

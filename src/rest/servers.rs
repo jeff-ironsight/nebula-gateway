@@ -22,20 +22,20 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 #[derive(Serialize)]
-pub(crate) struct ServerResponse {
-    pub(crate) id: Uuid,
-    pub(crate) name: String,
-    pub(crate) owner_user_id: Option<Uuid>,
-    pub(crate) my_role: String,
-    pub(crate) channels: Vec<ChannelResponse>,
+pub struct ServerResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub owner_user_id: Option<Uuid>,
+    pub my_role: String,
+    pub channels: Vec<ChannelResponse>,
 }
 
 #[derive(Serialize)]
-pub(crate) struct ChannelResponse {
-    pub(crate) id: Uuid,
-    pub(crate) server_id: Uuid,
-    pub(crate) name: String,
-    pub(crate) channel_type: ChannelType,
+pub struct ChannelResponse {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub name: String,
+    pub channel_type: ChannelType,
 }
 
 #[derive(Deserialize)]
@@ -353,7 +353,7 @@ mod tests {
         let request = Request::builder()
             .method("GET")
             .uri("/servers")
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -385,7 +385,7 @@ mod tests {
         let create_request = Request::builder()
             .method("POST")
             .uri("/servers")
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"name": "My Server"}"#))
             .unwrap();
@@ -407,7 +407,7 @@ mod tests {
         let list_request = Request::builder()
             .method("GET")
             .uri("/servers")
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -438,7 +438,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri("/servers")
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"name": "  "}"#))
             .unwrap();
@@ -474,7 +474,7 @@ mod tests {
         let request = Request::builder()
             .method("GET")
             .uri(format!("/servers/{}/channels", server_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -492,15 +492,15 @@ mod tests {
         // Note: create_server auto-creates a "general" channel
         let auth_sub = format!("auth0|create-channel-{}", Uuid::new_v4());
         let users = UserRepository::new(&state.db);
-        let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+        let user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
         let servers = ServerRepository::new(&state.db);
-        let server_id = servers.create_server("My Server", &_user_id).await.unwrap();
+        let server_id = servers.create_server("My Server", &user_id).await.unwrap();
 
         // Create another channel
         let create_request = Request::builder()
             .method("POST")
             .uri(format!("/servers/{}/channels", server_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"name": "random"}"#))
             .unwrap();
@@ -518,7 +518,7 @@ mod tests {
         let list_request = Request::builder()
             .method("GET")
             .uri(format!("/servers/{}/channels", server_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -559,14 +559,14 @@ mod tests {
         // Create user and server with unique auth sub
         let auth_sub = format!("auth0|reject-channel-empty-{}", Uuid::new_v4());
         let users = UserRepository::new(&state.db);
-        let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+        let user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
         let servers = ServerRepository::new(&state.db);
-        let server_id = servers.create_server("My Server", &_user_id).await.unwrap();
+        let server_id = servers.create_server("My Server", &user_id).await.unwrap();
 
         let request = Request::builder()
             .method("POST")
             .uri(format!("/servers/{}/channels", server_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"name": "   "}"#))
             .unwrap();
@@ -584,9 +584,9 @@ mod tests {
         // Create user and server with unique auth sub
         let auth_sub = format!("auth0|non-admin-{}", Uuid::new_v4());
         let users = UserRepository::new(&state.db);
-        let _user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+        let user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
         let servers = ServerRepository::new(&state.db);
-        let server_id = servers.create_server("My Server", &_user_id).await.unwrap();
+        let server_id = servers.create_server("My Server", &user_id).await.unwrap();
 
         // Create another user who is not an admin or owner
         let other_auth_sub = format!("auth0|other-non-admin-{}", Uuid::new_v4());
@@ -599,7 +599,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/servers/{}/channels", server_id.0))
-            .header("Authorization", format!("Bearer {}", other_auth_sub))
+            .header("Authorization", format!("Bearer {other_auth_sub}"))
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"name": "random"}"#))
             .unwrap();
@@ -624,7 +624,7 @@ mod tests {
         let request = Request::builder()
             .method("DELETE")
             .uri(format!("/servers/{}", server_id.0))
-            .header("Authorization", format!("Bearer {}", owner_sub))
+            .header("Authorization", format!("Bearer {owner_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -653,7 +653,7 @@ mod tests {
         let request = Request::builder()
             .method("DELETE")
             .uri(format!("/servers/{}", server_id.0))
-            .header("Authorization", format!("Bearer {}", other_sub))
+            .header("Authorization", format!("Bearer {other_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -689,7 +689,7 @@ mod tests {
         let request = Request::builder()
             .method("GET")
             .uri(format!("/servers/{}/channels", server_id.0))
-            .header("Authorization", format!("Bearer {}", member_sub))
+            .header("Authorization", format!("Bearer {member_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -730,7 +730,7 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri(format!("/servers/{}/channels", server_id.0))
-            .header("Authorization", format!("Bearer {}", admin_sub))
+            .header("Authorization", format!("Bearer {admin_sub}"))
             .header("Content-Type", "application/json")
             .body(Body::from(r#"{"name": "ops"}"#))
             .unwrap();

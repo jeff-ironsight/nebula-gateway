@@ -317,7 +317,7 @@ mod tests {
                 assert_eq!(ready.heartbeat_interval_ms, 25_000);
                 assert_eq!(ready.is_developer, is_developer);
             }
-            other => panic!("expected READY dispatch, got {:?}", other),
+            other => panic!("expected READY dispatch, got {other:?}"),
         }
     }
 
@@ -337,7 +337,7 @@ mod tests {
                 assert_eq!(t, "ERROR");
                 assert_eq!(d.get("code"), Some(&json!(code)));
             }
-            other => panic!("expected ERROR dispatch, got {:?}", other),
+            other => panic!("expected ERROR dispatch, got {other:?}"),
         }
     }
 
@@ -375,6 +375,7 @@ mod tests {
 
         let channels = state.connection_channels.get(&connection_id).unwrap();
         assert_eq!(channels.len(), 1);
+        drop(channels);
     }
 
     #[tokio::test]
@@ -434,7 +435,7 @@ mod tests {
                     GatewayPayload::Dispatch { t, .. } if t == "MESSAGE_CREATE"
                 ));
             }
-            other => panic!("expected text message, got {:?}", other),
+            other => panic!("expected text message, got {other:?}"),
         }
 
         let subscribers = state.channel_subscribers.get(&channel_id).unwrap();
@@ -507,7 +508,7 @@ mod tests {
                     GatewayPayload::Dispatch { t, .. } if t == "MESSAGE_CREATE"
                 ));
             }
-            other => panic!("expected text message, got {:?}", other),
+            other => panic!("expected text message, got {other:?}"),
         }
 
         let subscribers = state.channel_subscribers.get(&channel_id).unwrap();
@@ -530,7 +531,7 @@ mod tests {
             ChannelId::from(Uuid::new_v4()),
             ChannelId::from(Uuid::new_v4()),
         ];
-        for channel in channels.iter().cloned() {
+        for channel in channels.iter().copied() {
             subscribe_to_channel(&state, channel, connection_id);
         }
 
@@ -554,7 +555,7 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
 
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{addr}/ws");
         let (mut socket, _) = connect_async(&url).await.unwrap();
 
         let message = socket.next().await.unwrap().unwrap();
@@ -590,7 +591,7 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
 
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{addr}/ws");
         let (mut socket, _) = connect_async(&url).await.unwrap();
         socket.next().await.unwrap().unwrap();
 
@@ -626,7 +627,7 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
 
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{addr}/ws");
         let (mut socket, _) = connect_async(&url).await.unwrap();
         socket.next().await.unwrap().unwrap(); // Hello
 
@@ -642,10 +643,16 @@ mod tests {
             .unwrap();
 
         // "general" is auto-created by create_server
-        let channels = ChannelRepository::new(&state.db);
-        let server_channels = channels.get_channels_for_server(&server_id).await.unwrap();
-        let channel1 = server_channels[0].id;
-        let channel2 = channels.create_channel(&server_id, "random").await.unwrap();
+        let channel_repo = ChannelRepository::new(&state.db);
+        let server_channels = channel_repo
+            .get_channels_for_server(&server_id)
+            .await
+            .unwrap();
+        let general_id = server_channels[0].id;
+        let random_id = channel_repo
+            .create_channel(&server_id, "random")
+            .await
+            .unwrap();
 
         // Identify
         identify_connection(&mut socket, Token(user_sub.clone()), user_id, &user_sub).await;
@@ -670,10 +677,10 @@ mod tests {
                 let channel_ids: Vec<ChannelId> =
                     from_value(d.get("channel_ids").unwrap().clone()).unwrap();
                 // User has default server channel + 2 created channels
-                assert!(channel_ids.contains(&channel1));
-                assert!(channel_ids.contains(&channel2));
+                assert!(channel_ids.contains(&general_id));
+                assert!(channel_ids.contains(&random_id));
             }
-            other => panic!("expected SUBSCRIBED dispatch, got {:?}", other),
+            other => panic!("expected SUBSCRIBED dispatch, got {other:?}"),
         }
 
         socket.close(None).await.unwrap();
@@ -690,7 +697,7 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
 
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{addr}/ws");
         let (mut socket, _) = connect_async(&url).await.unwrap();
         socket.next().await.unwrap().unwrap();
 
@@ -731,7 +738,7 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
 
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{addr}/ws");
         let (mut alice, _) = connect_async(&url).await.unwrap();
         let (mut bob, _) = connect_async(&url).await.unwrap();
 
@@ -821,7 +828,7 @@ mod tests {
                 assert_eq!(d.get("content"), Some(&json!("hello world")));
                 assert_eq!(d.get("author_user_id"), Some(&json!(alice_user_id)));
             }
-            other => panic!("expected dispatch payload, got {:?}", other),
+            other => panic!("expected dispatch payload, got {other:?}"),
         }
 
         alice.close(None).await.unwrap();
@@ -839,7 +846,7 @@ mod tests {
             serve(listener, router).await.unwrap();
         });
 
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{addr}/ws");
         let (mut alice, _) = connect_async(&url).await.unwrap();
 
         alice.next().await.unwrap().unwrap();
@@ -911,7 +918,7 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
 
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{addr}/ws");
         let (mut socket, _) = connect_async(&url).await.unwrap();
         socket.next().await.unwrap().unwrap();
 
@@ -941,7 +948,7 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
 
-        let url = format!("ws://{}/ws", addr);
+        let url = format!("ws://{addr}/ws");
         let (mut socket, _) = connect_async(&url).await.unwrap();
         socket.next().await.unwrap().unwrap();
 

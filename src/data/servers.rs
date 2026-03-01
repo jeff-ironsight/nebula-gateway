@@ -14,19 +14,19 @@ pub struct ServerRepository<'a> {
 }
 
 impl<'a> ServerRepository<'a> {
-    pub fn new(pool: &'a PgPool) -> Self {
+    pub const fn new(pool: &'a PgPool) -> Self {
         Self { pool }
     }
 
     pub async fn get_servers_for_user(&self, user_id: &UserId) -> Result<Vec<Server>, sqlx::Error> {
         let rows = sqlx::query_as::<_, (Uuid, String, Option<Uuid>, String)>(
-            r#"
+            r"
             select s.id, s.name, s.owner_user_id, sm.role
             from servers s
             join server_members sm on sm.server_id = s.id
             where sm.user_id = $1
             order by s.name
-            "#,
+            ",
         )
         .bind(user_id.0)
         .fetch_all(self.pool)
@@ -49,12 +49,12 @@ impl<'a> ServerRepository<'a> {
         user_id: &UserId,
     ) -> Result<Option<Server>, sqlx::Error> {
         let row = sqlx::query_as::<_, (Uuid, String, Option<Uuid>, String)>(
-            r#"
+            r"
             select s.id, s.name, s.owner_user_id, sm.role
             from servers s
             join server_members sm on sm.server_id = s.id
             where sm.user_id = $1 and s.id = $2
-            "#,
+            ",
         )
         .bind(user_id.0)
         .bind(server_id.0)
@@ -121,11 +121,11 @@ impl<'a> ServerRepository<'a> {
         role: &str,
     ) -> Result<(), sqlx::Error> {
         sqlx::query!(
-            r#"
+            r"
             insert into server_members (server_id, user_id, role)
             values ($1, $2, $3)
             on conflict (server_id, user_id) do nothing
-            "#,
+            ",
             server_id.0,
             user_id.0,
             role

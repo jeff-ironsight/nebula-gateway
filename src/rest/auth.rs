@@ -49,7 +49,7 @@ impl FromRequestParts<Arc<AppState>> for AuthenticatedUser {
 
         let claims = auth0.verify(token).await.map_err(|e| {
             AuthError {
-                error: format!("Token verification failed: {:?}", e),
+                error: format!("Token verification failed: {e:?}"),
             }
             .into_response()
         })?;
@@ -66,7 +66,7 @@ impl FromRequestParts<Arc<AppState>> for AuthenticatedUser {
                 .into_response()
             })?;
 
-        Ok(AuthenticatedUser { user_id })
+        Ok(Self { user_id })
     }
 }
 
@@ -101,7 +101,7 @@ mod tests {
     }
 
     // Simple handler that requires authentication
-    async fn protected_handler(user: AuthenticatedUser) -> Json<serde_json::Value> {
+    async fn protected_handler(user: AuthenticatedUser) -> Json<Value> {
         Json(serde_json::json!({ "user_id": user.user_id.0.to_string() }))
     }
 
@@ -194,7 +194,7 @@ mod tests {
         let request = Request::builder()
             .method("GET")
             .uri("/protected")
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -223,7 +223,7 @@ mod tests {
         let request1 = Request::builder()
             .method("GET")
             .uri("/protected")
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -238,7 +238,7 @@ mod tests {
         let request2 = Request::builder()
             .method("GET")
             .uri("/protected")
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 

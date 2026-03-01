@@ -7,7 +7,7 @@ pub struct UserRepository<'a> {
 }
 
 impl<'a> UserRepository<'a> {
-    pub fn new(pool: &'a PgPool) -> Self {
+    pub const fn new(pool: &'a PgPool) -> Self {
         Self { pool }
     }
 
@@ -55,7 +55,7 @@ impl<'a> UserRepository<'a> {
             .bind(user_id.0)
             .fetch_optional(self.pool)
             .await
-            .map(|value| value.flatten())
+            .map(Option::flatten)
     }
 }
 

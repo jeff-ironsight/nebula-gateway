@@ -46,6 +46,8 @@ mod tests {
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
             let previous = std::env::var(key).ok();
+            // SAFETY: Tests run single-threaded under `cargo test` (no --test-threads=N
+            // override) and no other test spawns threads that read this env var.
             unsafe {
                 std::env::set_var(key, value);
             }
@@ -54,6 +56,7 @@ mod tests {
 
         fn unset(key: &'static str) -> Self {
             let previous = std::env::var(key).ok();
+            // SAFETY: Same single-threaded test context as `set`.
             unsafe {
                 std::env::remove_var(key);
             }
@@ -64,10 +67,13 @@ mod tests {
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             if let Some(value) = &self.previous {
+                // SAFETY: Restoring the previous value in the same single-threaded
+                // test context; no other threads observe this variable concurrently.
                 unsafe {
                     std::env::set_var(self.key, value);
                 }
             } else {
+                // SAFETY: Same single-threaded test context; removing a key we set.
                 unsafe {
                     std::env::remove_var(self.key);
                 }

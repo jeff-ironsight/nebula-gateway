@@ -197,7 +197,7 @@ mod tests {
         let request = Request::builder()
             .method("GET")
             .uri(format!("/channels/{}/messages", channel_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -243,17 +243,17 @@ mod tests {
                     &format!("01H{}", Uuid::new_v4()),
                     &channel_id,
                     &user_id,
-                    &format!("Message {}", i),
+                    &format!("Message {i}"),
                 )
                 .await
                 .unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
         let request = Request::builder()
             .method("GET")
             .uri(format!("/channels/{}/messages?limit=2", channel_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -282,8 +282,8 @@ mod tests {
         let fake_channel_id = Uuid::new_v4();
         let request = Request::builder()
             .method("GET")
-            .uri(format!("/channels/{}/messages", fake_channel_id))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .uri(format!("/channels/{fake_channel_id}/messages"))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
@@ -324,7 +324,7 @@ mod tests {
         let request = Request::builder()
             .method("GET")
             .uri(format!("/channels/{}/messages", channel_id.0))
-            .header("Authorization", format!("Bearer {}", auth_sub))
+            .header("Authorization", format!("Bearer {auth_sub}"))
             .body(Body::empty())
             .unwrap();
 
