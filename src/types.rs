@@ -99,7 +99,7 @@ impl InviteCode {
     /// Generates a new random 8-character alphanumeric invite code.
     /// Excludes ambiguous characters (0, O, 1, l, I) for readability.
     pub fn generate() -> Self {
-        use rand::Rng;
+        use rand::RngExt;
         const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
         let mut rng = rand::rng();
         let code: String = (0..8)
