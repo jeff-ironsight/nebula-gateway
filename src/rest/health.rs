@@ -20,11 +20,9 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    use crate::state::test_db;
-
-    #[tokio::test]
-    async fn healthz_returns_ok_when_db_is_up() {
-        let state = Arc::new(AppState::new(test_db().await, None));
+    #[sqlx::test]
+    async fn healthz_returns_ok_when_db_is_up(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
         let app = router().with_state(state);
         let request = Request::builder()
             .method("GET")

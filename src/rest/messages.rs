@@ -134,7 +134,6 @@ mod tests {
     use super::*;
     use crate::auth0::{Auth0Settings, Auth0Verifier};
     use crate::data::UserRepository;
-    use crate::state::test_db;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use serde_json::Value;
@@ -150,9 +149,8 @@ mod tests {
         })
     }
 
-    #[tokio::test]
-    async fn get_messages_returns_channel_messages() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_messages_returns_channel_messages(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -214,9 +212,8 @@ mod tests {
         assert_eq!(messages[1]["content"], "First message");
     }
 
-    #[tokio::test]
-    async fn get_messages_respects_limit() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_messages_respects_limit(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -269,9 +266,8 @@ mod tests {
         assert_eq!(messages[1]["content"], "Message 4");
     }
 
-    #[tokio::test]
-    async fn get_messages_returns_404_for_nonexistent_channel() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_messages_returns_404_for_nonexistent_channel(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -291,9 +287,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test]
-    async fn get_messages_returns_403_for_non_member() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_messages_returns_403_for_non_member(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -332,9 +327,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
-    #[tokio::test]
-    async fn get_messages_returns_401_for_unauthenticated() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_messages_returns_401_for_unauthenticated(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state);
 

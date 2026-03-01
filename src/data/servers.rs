@@ -185,11 +185,9 @@ impl<'a> ServerRepository<'a> {
 mod tests {
     use super::*;
     use crate::data::{ChannelRepository, UserRepository};
-    use crate::state::test_db;
 
-    #[tokio::test]
-    async fn create_server_adds_owner_as_member() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_server_adds_owner_as_member(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
 
@@ -211,9 +209,8 @@ mod tests {
         assert!(is_member);
     }
 
-    #[tokio::test]
-    async fn create_server_creates_general_channel() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_server_creates_general_channel(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let channels = ChannelRepository::new(&pool);
@@ -237,9 +234,8 @@ mod tests {
         assert_eq!(server_channels[0].name, "general");
     }
 
-    #[tokio::test]
-    async fn get_servers_for_user_returns_member_servers() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_servers_for_user_returns_member_servers(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
 
@@ -264,9 +260,8 @@ mod tests {
         assert!(user_servers.iter().any(|s| s.name == "Nebula"));
     }
 
-    #[tokio::test]
-    async fn get_server_for_user_returns_only_member_server() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_server_for_user_returns_only_member_server(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
 
@@ -306,9 +301,8 @@ mod tests {
         assert!(non_member.is_none());
     }
 
-    #[tokio::test]
-    async fn add_member_is_idempotent() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn add_member_is_idempotent(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
 
@@ -342,9 +336,8 @@ mod tests {
         assert!(is_member);
     }
 
-    #[tokio::test]
-    async fn is_owner_or_admin_and_is_owner_work() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn is_owner_or_admin_and_is_owner_work(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
 
@@ -408,9 +401,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn delete_server_removes_server() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn delete_server_removes_server(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
 

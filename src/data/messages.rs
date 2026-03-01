@@ -125,11 +125,9 @@ impl<'a> MessageRepository<'a> {
 mod tests {
     use super::*;
     use crate::data::{ChannelRepository, ServerRepository, UserRepository};
-    use crate::state::test_db;
 
-    #[tokio::test]
-    async fn create_and_get_messages() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_and_get_messages(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let channels = ChannelRepository::new(&pool);
@@ -173,9 +171,8 @@ mod tests {
         assert_eq!(fetched[0].author_username, "");
     }
 
-    #[tokio::test]
-    async fn get_messages_with_pagination() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_messages_with_pagination(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let channels = ChannelRepository::new(&pool);
@@ -231,9 +228,8 @@ mod tests {
         assert_eq!(page2[1].content, "Message 2");
     }
 
-    #[tokio::test]
-    async fn get_messages_empty_channel() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_messages_empty_channel(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let channels = ChannelRepository::new(&pool);

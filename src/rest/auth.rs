@@ -81,7 +81,6 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
 mod tests {
     use super::*;
     use crate::auth0::{Auth0Settings, Auth0Verifier};
-    use crate::state::test_db;
     use axum::Router;
     use axum::body::Body;
     use axum::http::{HeaderMap, Request, StatusCode};
@@ -138,9 +137,8 @@ mod tests {
         assert_eq!(extract_bearer_token(&headers), Some(""));
     }
 
-    #[tokio::test]
-    async fn authenticated_user_returns_401_without_auth_header() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn authenticated_user_returns_401_without_auth_header(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = test_router(state);
 
@@ -160,9 +158,8 @@ mod tests {
         assert_eq!(error["error"], "Missing or invalid Authorization header");
     }
 
-    #[tokio::test]
-    async fn authenticated_user_returns_401_without_auth0_configured() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn authenticated_user_returns_401_without_auth0_configured(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, None)); // No auth0
         let app = test_router(state);
 
@@ -183,9 +180,8 @@ mod tests {
         assert_eq!(error["error"], "Auth not configured");
     }
 
-    #[tokio::test]
-    async fn authenticated_user_creates_user_on_first_auth() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn authenticated_user_creates_user_on_first_auth(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = test_router(state.clone());
 
@@ -211,9 +207,8 @@ mod tests {
         assert!(Uuid::parse_str(user_id_str).is_ok());
     }
 
-    #[tokio::test]
-    async fn authenticated_user_returns_same_user_on_subsequent_auth() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn authenticated_user_returns_same_user_on_subsequent_auth(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
 
         let auth_sub = format!("auth0|repeat-user-{}", Uuid::new_v4());

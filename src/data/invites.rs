@@ -275,12 +275,10 @@ impl<'a> InviteRepository<'a> {
 mod tests {
     use super::*;
     use crate::data::{ServerRepository, UserRepository};
-    use crate::state::test_db;
     use chrono::Duration;
 
-    #[tokio::test]
-    async fn create_invite_generates_unique_code() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_invite_generates_unique_code(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);
@@ -307,9 +305,8 @@ mod tests {
         assert_eq!(invite.use_count, 0);
     }
 
-    #[tokio::test]
-    async fn create_invite_retries_on_code_collision() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_invite_retries_on_code_collision(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);
@@ -338,9 +335,8 @@ mod tests {
         assert_ne!(second.code, fixed);
     }
 
-    #[tokio::test]
-    async fn get_by_code_returns_invite() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_by_code_returns_invite(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);
@@ -369,9 +365,8 @@ mod tests {
         assert_eq!(fetched.max_uses, Some(10));
     }
 
-    #[tokio::test]
-    async fn get_preview_returns_server_info() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_preview_returns_server_info(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);
@@ -401,9 +396,8 @@ mod tests {
         assert_eq!(preview.member_count, 1); // Owner is a member
     }
 
-    #[tokio::test]
-    async fn use_invite_adds_member_and_increments_count() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_adds_member_and_increments_count(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);
@@ -449,9 +443,8 @@ mod tests {
         assert_eq!(updated.use_count, 1);
     }
 
-    #[tokio::test]
-    async fn use_invite_returns_none_for_expired_invite() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_returns_none_for_expired_invite(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);
@@ -483,9 +476,8 @@ mod tests {
         assert!(result.is_none());
     }
 
-    #[tokio::test]
-    async fn use_invite_returns_none_when_max_uses_reached() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_returns_none_when_max_uses_reached(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);
@@ -528,9 +520,8 @@ mod tests {
         assert!(result2.is_none());
     }
 
-    #[tokio::test]
-    async fn use_invite_idempotent_for_existing_member() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_idempotent_for_existing_member(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);
@@ -565,9 +556,8 @@ mod tests {
         assert_eq!(updated.use_count, 0);
     }
 
-    #[tokio::test]
-    async fn delete_removes_invite() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn delete_removes_invite(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);
@@ -596,9 +586,8 @@ mod tests {
         assert!(fetched.is_none());
     }
 
-    #[tokio::test]
-    async fn is_creator_returns_true_for_creator() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn is_creator_returns_true_for_creator(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let invites = InviteRepository::new(&pool);

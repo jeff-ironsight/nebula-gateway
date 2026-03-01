@@ -362,7 +362,6 @@ mod tests {
     use super::*;
     use crate::auth0::{Auth0Settings, Auth0Verifier};
     use crate::data::UserRepository;
-    use crate::state::test_db;
     use axum::body::Body;
     use axum::http::Request;
     use serde_json::Value;
@@ -378,9 +377,8 @@ mod tests {
         })
     }
 
-    #[tokio::test]
-    async fn create_invite_requires_membership() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_invite_requires_membership(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -411,9 +409,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
-    #[tokio::test]
-    async fn create_invite_returns_code() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_invite_returns_code(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -445,9 +442,8 @@ mod tests {
         assert_eq!(invite["use_count"], 0);
     }
 
-    #[tokio::test]
-    async fn create_invite_sets_expiration_when_requested() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_invite_sets_expiration_when_requested(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -477,9 +473,8 @@ mod tests {
         assert!(invite["expires_at"].is_string());
     }
 
-    #[tokio::test]
-    async fn preview_invite_is_public() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn preview_invite_is_public(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -518,9 +513,8 @@ mod tests {
         assert_eq!(preview["member_count"], 1);
     }
 
-    #[tokio::test]
-    async fn preview_invite_returns_404_when_expired() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn preview_invite_returns_404_when_expired(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -551,9 +545,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test]
-    async fn use_invite_adds_user_to_server() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_adds_user_to_server(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -605,9 +598,8 @@ mod tests {
         assert!(is_member);
     }
 
-    #[tokio::test]
-    async fn use_invite_returns_400_when_expired() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_returns_400_when_expired(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -641,9 +633,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[tokio::test]
-    async fn revoke_invite_requires_creator_or_admin() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn revoke_invite_requires_creator_or_admin(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -688,9 +679,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
-    #[tokio::test]
-    async fn revoke_invite_allows_admin_when_not_creator() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn revoke_invite_allows_admin_when_not_creator(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -727,9 +717,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
-    #[tokio::test]
-    async fn preview_invite_returns_404_when_missing() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn preview_invite_returns_404_when_missing(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state);
 
@@ -743,9 +732,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test]
-    async fn create_invite_returns_401_for_unauthenticated() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_invite_returns_401_for_unauthenticated(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -770,9 +758,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
-    #[tokio::test]
-    async fn use_invite_returns_404_when_missing() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_returns_404_when_missing(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -791,9 +778,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test]
-    async fn use_invite_returns_401_for_unauthenticated() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_returns_401_for_unauthenticated(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state);
 
@@ -807,9 +793,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
-    #[tokio::test]
-    async fn use_invite_returns_400_when_max_uses_exceeded() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_returns_400_when_max_uses_exceeded(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -854,9 +839,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[tokio::test]
-    async fn use_invite_sets_already_member_true() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn use_invite_sets_already_member_true(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -902,9 +886,8 @@ mod tests {
         assert!(result["server"].is_null());
     }
 
-    #[tokio::test]
-    async fn revoke_invite_returns_404_when_missing() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn revoke_invite_returns_404_when_missing(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 

@@ -63,11 +63,9 @@ impl<'a> UserRepository<'a> {
 mod tests {
     use super::*;
     use crate::data::ServerRepository;
-    use crate::state::test_db;
 
-    #[tokio::test]
-    async fn get_or_create_by_auth_sub_is_idempotent() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_or_create_by_auth_sub_is_idempotent(pool: sqlx::PgPool) {
         let repo = UserRepository::new(&pool);
 
         let first = repo
@@ -82,9 +80,8 @@ mod tests {
         assert_eq!(first.0, second.0);
     }
 
-    #[tokio::test]
-    async fn get_username_by_id_returns_none_for_missing_username() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_username_by_id_returns_none_for_missing_username(pool: sqlx::PgPool) {
         let repo = UserRepository::new(&pool);
 
         let user_id = repo
@@ -100,9 +97,8 @@ mod tests {
         assert!(username.is_none());
     }
 
-    #[tokio::test]
-    async fn new_user_is_auto_joined_to_default_server() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn new_user_is_auto_joined_to_default_server(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
 
@@ -120,9 +116,8 @@ mod tests {
         assert!(is_member);
     }
 
-    #[tokio::test]
-    async fn new_user_sees_default_server_in_server_list() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn new_user_sees_default_server_in_server_list(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
 

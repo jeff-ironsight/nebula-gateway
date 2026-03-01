@@ -9,6 +9,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   COVERAGE_IGNORE_REGEX: src/main.rs|src/types.rs
+  DATABASE_URL: postgres://root:rootpass@localhost:5432/nebuladb
+  SQLX_OFFLINE: "true"
 
 jobs:
   ci:
@@ -20,6 +22,21 @@ jobs:
       matrix:
         os: [ ubuntu-latest ]
         rust: [ stable ]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: rootpass
+          POSTGRES_DB: nebuladb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4

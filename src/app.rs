@@ -16,11 +16,9 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    use crate::state::test_db;
-
-    #[tokio::test]
-    async fn non_route_returns_not_found() {
-        let router = build_router(Arc::new(AppState::new(test_db().await, None)));
+    #[sqlx::test]
+    async fn non_route_returns_not_found(pool: sqlx::PgPool) {
+        let router = build_router(Arc::new(AppState::new(pool, None)));
         let request = Request::builder()
             .method("GET")
             .uri("/does-not-exist")

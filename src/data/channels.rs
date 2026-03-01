@@ -151,11 +151,9 @@ impl<'a> ChannelRepository<'a> {
 mod tests {
     use super::*;
     use crate::data::{ServerRepository, UserRepository};
-    use crate::state::test_db;
 
-    #[tokio::test]
-    async fn create_and_get_channel() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_and_get_channel(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let channels = ChannelRepository::new(&pool);
@@ -185,9 +183,8 @@ mod tests {
         assert_eq!(channel.server_id, server_id);
     }
 
-    #[tokio::test]
-    async fn get_channels_for_server() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_channels_for_server(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let channels = ChannelRepository::new(&pool);
@@ -218,9 +215,8 @@ mod tests {
         assert_eq!(server_channels[1].name, "random");
     }
 
-    #[tokio::test]
-    async fn get_by_id_returns_none_for_missing() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_by_id_returns_none_for_missing(pool: sqlx::PgPool) {
         let channels = ChannelRepository::new(&pool);
 
         let missing = channels
@@ -231,9 +227,8 @@ mod tests {
         assert!(missing.is_none());
     }
 
-    #[tokio::test]
-    async fn get_channels_for_user_returns_member_channels() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_channels_for_user_returns_member_channels(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let channels = ChannelRepository::new(&pool);
@@ -262,9 +257,8 @@ mod tests {
         assert!(user_channels.iter().any(|c| c.name == "general"));
     }
 
-    #[tokio::test]
-    async fn get_text_channels_for_user_filters_voice() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn get_text_channels_for_user_filters_voice(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let channels = ChannelRepository::new(&pool);
@@ -304,9 +298,8 @@ mod tests {
         assert!(!text_channels.iter().any(|c| c.name == "voice-room"));
     }
 
-    #[tokio::test]
-    async fn delete_channel_removes_channel() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn delete_channel_removes_channel(pool: sqlx::PgPool) {
         let users = UserRepository::new(&pool);
         let servers = ServerRepository::new(&pool);
         let channels = ChannelRepository::new(&pool);

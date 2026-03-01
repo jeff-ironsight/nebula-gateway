@@ -56,13 +56,10 @@ dev:
 	cargo install sqlx-cli --locked --no-default-features --features postgres
 	brew install gnuplot
 
-# Run tests. Note: nextest is incompatible with this project's test infrastructure,
-# which uses a process-local OnceCell to share a single Postgres container across
-# all tests. Nextest runs each test in its own process, so it would spin up one
-# container per test instead of sharing one.
+# Run tests. Each test gets an isolated database via #[sqlx::test] (requires DATABASE_URL).
 [group('TEST')]
 test:
-	cargo test --all-features --lib
+	DATABASE_URL={{ DATABASE_URL }} cargo nextest run --all-features
 
 # Open generated rustdoc.
 [group('TEST')]
@@ -73,7 +70,7 @@ doc:
 [group('TEST')]
 coverage:
 	just lint
-	cargo llvm-cov --workspace --all-features --html --ignore-filename-regex "{{ COVERAGE_IGNORE_REGEX }}"
+	DATABASE_URL={{ DATABASE_URL }} cargo llvm-cov --workspace --all-features --html --ignore-filename-regex "{{ COVERAGE_IGNORE_REGEX }}"
 	open target/llvm-cov/html/index.html
 
 alias cov := coverage
@@ -84,7 +81,7 @@ alias coverage-mac := coverage
 [group('TEST')]
 coverage-linux:
 	just lint
-	cargo llvm-cov --workspace --all-features --html --ignore-filename-regex "{{ COVERAGE_IGNORE_REGEX }}"
+	DATABASE_URL={{ DATABASE_URL }} cargo llvm-cov --workspace --all-features --html --ignore-filename-regex "{{ COVERAGE_IGNORE_REGEX }}"
 	xdg-open target/llvm-cov/html/index.html
 
 alias cov-linux := coverage-linux
@@ -93,7 +90,7 @@ alias cov-linux := coverage-linux
 [group('TEST')]
 coverage-win:
 	just lint
-	cargo llvm-cov --workspace --all-features --html --ignore-filename-regex "{{ COVERAGE_IGNORE_REGEX }}"
+	DATABASE_URL={{ DATABASE_URL }} cargo llvm-cov --workspace --all-features --html --ignore-filename-regex "{{ COVERAGE_IGNORE_REGEX }}"
 	start target/llvm-cov/html/index.html
 
 alias cov-win := coverage-win

@@ -27,7 +27,7 @@ Prefer the justfile targets over raw cargo invocations:
 just check       # fmt + clippy (auto-fix) + audit + tests — use for local dev
 just ci          # fmt --check + clippy -D warnings + audit + tests — strict, no auto-fix
 just lint        # fmt + clippy (auto-fix) + audit, no tests
-just test        # cargo test --all-features --lib
+just test        # cargo nextest run --all-features (per-test isolated DB)
 just fmt         # fmt + clippy fix only
 just doc         # cargo doc --no-deps --open
 just outdated    # cargo outdated --exit-code 1
@@ -67,10 +67,9 @@ Key style rules enforced by lints:
 
 ## Testing
 
-Tests use `testcontainers` to spin up real Postgres. The `test_db()` helper in `src/state.rs` handles container
-lifecycle and runs migrations automatically.
+Tests use `#[sqlx::test]` — each test function receives a fresh `sqlx::PgPool` connected to an isolated
+database that sqlx creates automatically, runs migrations on, and tears down after the test. This requires
+a running Postgres (start with `just docker`) and `DATABASE_URL` set (the justfile handles this).
 
-**Do not use `cargo nextest`** with this project. The test infrastructure uses a process-local `static OnceCell`
-to share a single Postgres container across all tests. Nextest runs each test in its own process, which causes
-one container to be spawned per test — exhausting Docker's VM disk with 100+ simultaneous containers.
-Always run tests with `cargo test --all-features --lib` (or `just test`).
+Use `just test` (which runs `cargo nextest`) or `just check` for the full suite. Nextest is fully compatible
+because each test gets its own independent database rather than sharing a single container via `OnceCell`.

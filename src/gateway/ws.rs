@@ -269,7 +269,7 @@ mod tests {
             broadcast_message_to_channel, cleanup_connection, subscribe_to_channel,
         },
         protocol::{ErrorCode, ReadyEvent},
-        state::{AppState, test_db},
+        state::AppState,
         types::{ChannelId, Token, UserId},
     };
     use axum::serve;
@@ -360,9 +360,9 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
-    async fn subscribe_to_channel_is_idempotent() {
-        let state = Arc::new(AppState::new(test_db().await, None));
+    #[sqlx::test]
+    async fn subscribe_to_channel_is_idempotent(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
         let channel_id = ChannelId::from(Uuid::new_v4());
         let connection_id = ConnectionId::from(Uuid::new_v4());
 
@@ -378,9 +378,9 @@ mod tests {
         drop(channels);
     }
 
-    #[tokio::test]
-    async fn broadcast_removes_stale_subscribers() {
-        let state = Arc::new(AppState::new(test_db().await, None));
+    #[sqlx::test]
+    async fn broadcast_removes_stale_subscribers(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
 
         // Create user, server, and channel in DB for message persistence
         let users = UserRepository::new(&state.db);
@@ -447,9 +447,9 @@ mod tests {
         assert!(state.connection_channels.get(&active_connection).is_some());
     }
 
-    #[tokio::test]
-    async fn broadcast_removes_closed_senders() {
-        let state = Arc::new(AppState::new(test_db().await, None));
+    #[sqlx::test]
+    async fn broadcast_removes_closed_senders(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
 
         // Create user, server, and channel in DB for message persistence
         let users = UserRepository::new(&state.db);
@@ -520,9 +520,9 @@ mod tests {
         assert!(state.connection_channels.get(&active_connection).is_some());
     }
 
-    #[tokio::test]
-    async fn cleanup_connection_removes_all_channels() {
-        let state = Arc::new(AppState::new(test_db().await, None));
+    #[sqlx::test]
+    async fn cleanup_connection_removes_all_channels(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
         let connection_id = ConnectionId::from(Uuid::new_v4());
         let (tx, _rx) = unbounded_channel();
         state.connections.insert(connection_id, tx);
@@ -545,9 +545,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn hello_payload_is_sent_on_connect() {
-        let state = Arc::new(AppState::new(test_db().await, None));
+    #[sqlx::test]
+    async fn hello_payload_is_sent_on_connect(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -581,9 +581,9 @@ mod tests {
         server.abort();
     }
 
-    #[tokio::test]
-    async fn subscribe_is_ignored_when_not_identified() {
-        let state = Arc::new(AppState::new(test_db().await, None));
+    #[sqlx::test]
+    async fn subscribe_is_ignored_when_not_identified(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -617,9 +617,9 @@ mod tests {
         server.abort();
     }
 
-    #[tokio::test]
-    async fn subscribe_subscribes_to_user_channels() {
-        let state = Arc::new(AppState::new(test_db().await, Some(test_auth0())));
+    #[sqlx::test]
+    async fn subscribe_subscribes_to_user_channels(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -687,9 +687,9 @@ mod tests {
         server.abort();
     }
 
-    #[tokio::test]
-    async fn message_create_is_ignored_when_not_identified() {
-        let state = Arc::new(AppState::new(test_db().await, None));
+    #[sqlx::test]
+    async fn message_create_is_ignored_when_not_identified(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -728,9 +728,9 @@ mod tests {
         server.abort();
     }
 
-    #[tokio::test]
-    async fn message_create_broadcasts_to_channel_subscribers() {
-        let state = Arc::new(AppState::new(test_db().await, Some(test_auth0())));
+    #[sqlx::test]
+    async fn message_create_broadcasts_to_channel_subscribers(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -836,9 +836,9 @@ mod tests {
         server.abort();
     }
 
-    #[tokio::test]
-    async fn message_create_is_ignored_when_not_subscribed() {
-        let state = Arc::new(AppState::new(test_db().await, Some(test_auth0())));
+    #[sqlx::test]
+    async fn message_create_is_ignored_when_not_subscribed(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -904,11 +904,11 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn identify_returns_is_developer_true_for_developer_user() {
+    #[sqlx::test]
+    async fn identify_returns_is_developer_true_for_developer_user(pool: sqlx::PgPool) {
         let dev_sub = format!("auth0|dev-{}", Uuid::new_v4());
         let state = Arc::new(AppState::new(
-            test_db().await,
+            pool,
             Some(test_auth0_with_developer(&dev_sub)),
         ));
         let router = app::build_router(state.clone());
@@ -938,9 +938,9 @@ mod tests {
         server.abort();
     }
 
-    #[tokio::test]
-    async fn identify_returns_is_developer_false_for_regular_user() {
-        let state = Arc::new(AppState::new(test_db().await, Some(test_auth0())));
+    #[sqlx::test]
+    async fn identify_returns_is_developer_false_for_regular_user(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let router = app::build_router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

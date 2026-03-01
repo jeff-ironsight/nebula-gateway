@@ -323,7 +323,6 @@ mod tests {
     use super::*;
     use crate::auth0::{Auth0Settings, Auth0Verifier};
     use crate::data::{ChannelRepository, UserRepository};
-    use crate::state::test_db;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use serde_json::Value;
@@ -339,9 +338,8 @@ mod tests {
         })
     }
 
-    #[tokio::test]
-    async fn list_servers_returns_default_server_for_new_user() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn list_servers_returns_default_server_for_new_user(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -370,9 +368,8 @@ mod tests {
         assert_eq!(servers[0]["name"], "Nebula");
     }
 
-    #[tokio::test]
-    async fn create_server_and_list() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_server_and_list(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -425,9 +422,8 @@ mod tests {
         assert!(servers.iter().any(|s| s["name"] == "Nebula"));
     }
 
-    #[tokio::test]
-    async fn create_server_rejects_empty_name() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_server_rejects_empty_name(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -447,9 +443,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[tokio::test]
-    async fn list_channels_requires_membership() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn list_channels_requires_membership(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -482,9 +477,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
-    #[tokio::test]
-    async fn create_channel_and_list() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_channel_and_list(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -534,9 +528,8 @@ mod tests {
         assert_eq!(channels[1]["name"], "random");
     }
 
-    #[tokio::test]
-    async fn unauthenticated_request_returns_401() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn unauthenticated_request_returns_401(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state);
 
@@ -550,9 +543,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
-    #[tokio::test]
-    async fn create_channel_rejects_empty_name() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_channel_rejects_empty_name(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -575,9 +567,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[tokio::test]
-    async fn create_channel_only_for_server_admins_and_owners() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_channel_only_for_server_admins_and_owners(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -608,9 +599,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
-    #[tokio::test]
-    async fn delete_server_returns_204_for_owner() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn delete_server_returns_204_for_owner(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -632,9 +622,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
-    #[tokio::test]
-    async fn delete_server_returns_403_for_non_owner() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn delete_server_returns_403_for_non_owner(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -661,9 +650,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
-    #[tokio::test]
-    async fn list_channels_returns_channels_for_member() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn list_channels_returns_channels_for_member(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
@@ -705,9 +693,8 @@ mod tests {
         assert!(channels.iter().any(|c| c["name"] == "random"));
     }
 
-    #[tokio::test]
-    async fn create_channel_allows_admin() {
-        let pool = test_db().await;
+    #[sqlx::test]
+    async fn create_channel_allows_admin(pool: sqlx::PgPool) {
         let state = Arc::new(AppState::new(pool, Some(test_auth0())));
         let app = router().with_state(state.clone());
 
