@@ -33,6 +33,14 @@ impl IntoResponse for ApiError {
     }
 }
 
+fn internal_error(error: impl std::fmt::Display, context: &str) -> Response {
+    tracing::error!(error = %error, context, "Internal error");
+    ApiError {
+        error: "Internal error".to_string(),
+    }
+    .into_response()
+}
+
 async fn get_channel(
     State(state): State<Arc<AppState>>,
     user: AuthenticatedUser,
@@ -41,38 +49,26 @@ async fn get_channel(
     let channel_id = ChannelId::from(channel_id);
     let channels = ChannelRepository::new(&state.db);
 
-    let channel = channels
-        .get_by_id(&channel_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to get channel");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
+    let channel = match channels.get_by_id(&channel_id).await {
+        Ok(channel) => channel,
+        Err(e) => return Err(internal_error(e, "Failed to get channel")),
+    }
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                error: "Channel not found".to_string(),
+            }),
+        )
             .into_response()
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ApiError {
-                    error: "Channel not found".to_string(),
-                }),
-            )
-                .into_response()
-        })?;
+    })?;
 
     // Verify user is member of the channel's server
     let servers = ServerRepository::new(&state.db);
-    let is_member = servers
-        .is_member(&channel.server_id, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to check server membership");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let is_member = match servers.is_member(&channel.server_id, &user.user_id).await {
+        Ok(is_member) => is_member,
+        Err(e) => return Err(internal_error(e, "Failed to check server membership")),
+    };
 
     if !is_member {
         return Err((
@@ -99,38 +95,29 @@ async fn delete_channel(
     let channel_id = ChannelId::from(channel_id);
     let channels = ChannelRepository::new(&state.db);
 
-    let channel = channels
-        .get_by_id(&channel_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to get channel for deletion");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
+    let channel = match channels.get_by_id(&channel_id).await {
+        Ok(channel) => channel,
+        Err(e) => return Err(internal_error(e, "Failed to get channel for deletion")),
+    }
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                error: "Channel not found".to_string(),
+            }),
+        )
             .into_response()
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ApiError {
-                    error: "Channel not found".to_string(),
-                }),
-            )
-                .into_response()
-        })?;
+    })?;
 
     // Verify user is owner or admin of the channel's server
     let servers = ServerRepository::new(&state.db);
-    let is_owner_or_admin = servers
+    let is_owner_or_admin = match servers
         .is_owner_or_admin(&channel.server_id, &user.user_id)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to check server membership");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    {
+        Ok(is_owner_or_admin) => is_owner_or_admin,
+        Err(e) => return Err(internal_error(e, "Failed to check server membership")),
+    };
 
     if !is_owner_or_admin {
         return Err((
@@ -142,13 +129,10 @@ async fn delete_channel(
             .into_response());
     }
 
-    channels.delete_channel(&channel_id).await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to delete channel");
-        ApiError {
-            error: "Internal error".to_string(),
-        }
-        .into_response()
-    })?;
+    match channels.delete_channel(&channel_id).await {
+        Ok(()) => {}
+        Err(e) => return Err(internal_error(e, "Failed to delete channel")),
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -407,5 +391,55 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn get_channel_returns_bad_request_when_lookup_fails(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = get_channel(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+            Path(Uuid::new_v4()),
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
+    }
+
+    #[sqlx::test]
+    async fn delete_channel_returns_bad_request_when_lookup_fails(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = delete_channel(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+            Path(Uuid::new_v4()),
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
     }
 }

@@ -59,6 +59,14 @@ impl IntoResponse for ApiError {
     }
 }
 
+fn internal_error(error: impl std::fmt::Display, context: &str) -> Response {
+    tracing::error!(error = %error, context, "Internal error");
+    ApiError {
+        error: "Internal error".to_string(),
+    }
+    .into_response()
+}
+
 async fn list_servers(
     State(state): State<Arc<AppState>>,
     user: AuthenticatedUser,
@@ -66,29 +74,17 @@ async fn list_servers(
     let servers = ServerRepository::new(&state.db);
     let channels = ChannelRepository::new(&state.db);
 
-    let user_servers = servers
-        .get_servers_for_user(&user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to list servers");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let user_servers = match servers.get_servers_for_user(&user.user_id).await {
+        Ok(user_servers) => user_servers,
+        Err(e) => return Err(internal_error(e, "Failed to list servers")),
+    };
 
     let mut result = Vec::with_capacity(user_servers.len());
     for server in user_servers {
-        let server_channels = channels
-            .get_channels_for_server(&server.id)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to list channels for server");
-                ApiError {
-                    error: "Internal error".to_string(),
-                }
-                .into_response()
-            })?;
+        let server_channels = match channels.get_channels_for_server(&server.id).await {
+            Ok(server_channels) => server_channels,
+            Err(e) => return Err(internal_error(e, "Failed to list channels for server")),
+        };
 
         result.push(ServerResponse {
             id: server.id.0,
@@ -123,29 +119,17 @@ async fn create_server(
     }
 
     let servers = ServerRepository::new(&state.db);
-    let server_id = servers
-        .create_server(&request.name, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to create server");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let server_id = match servers.create_server(&request.name, &user.user_id).await {
+        Ok(server_id) => server_id,
+        Err(e) => return Err(internal_error(e, "Failed to create server")),
+    };
 
     // Fetch the auto-created channels
     let channel_repo = ChannelRepository::new(&state.db);
-    let channels = channel_repo
-        .get_channels_for_server(&server_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to get channels for new server");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let channels = match channel_repo.get_channels_for_server(&server_id).await {
+        Ok(channels) => channels,
+        Err(e) => return Err(internal_error(e, "Failed to get channels for new server")),
+    };
 
     Ok(Json(ServerResponse {
         id: server_id.0,
@@ -173,16 +157,10 @@ async fn delete_server(
 
     // Verify user is owner of server
     let servers = ServerRepository::new(&state.db);
-    let is_owner = servers
-        .is_owner(&server_id, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to check server ownership");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let is_owner = match servers.is_owner(&server_id, &user.user_id).await {
+        Ok(is_owner) => is_owner,
+        Err(e) => return Err(internal_error(e, "Failed to check server ownership")),
+    };
 
     if !is_owner {
         return Err((
@@ -194,13 +172,10 @@ async fn delete_server(
             .into_response());
     }
 
-    servers.delete_server(&server_id).await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to delete server");
-        ApiError {
-            error: "Internal error".to_string(),
-        }
-        .into_response()
-    })?;
+    match servers.delete_server(&server_id).await {
+        Ok(()) => {}
+        Err(e) => return Err(internal_error(e, "Failed to delete server")),
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -214,16 +189,10 @@ async fn list_channels(
 
     // Verify user is member of server
     let servers = ServerRepository::new(&state.db);
-    let is_member = servers
-        .is_member(&server_id, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to check server membership");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let is_member = match servers.is_member(&server_id, &user.user_id).await {
+        Ok(is_member) => is_member,
+        Err(e) => return Err(internal_error(e, "Failed to check server membership")),
+    };
 
     if !is_member {
         return Err((
@@ -236,16 +205,10 @@ async fn list_channels(
     }
 
     let channels = ChannelRepository::new(&state.db);
-    let server_channels = channels
-        .get_channels_for_server(&server_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to list channels");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let server_channels = match channels.get_channels_for_server(&server_id).await {
+        Ok(server_channels) => server_channels,
+        Err(e) => return Err(internal_error(e, "Failed to list channels")),
+    };
 
     Ok(Json(
         server_channels
@@ -277,16 +240,10 @@ async fn create_channel(
 
     // Verify user is owner or admin of server
     let servers = ServerRepository::new(&state.db);
-    let is_owner_or_admin = servers
-        .is_owner_or_admin(&server_id, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to check server membership");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let is_owner_or_admin = match servers.is_owner_or_admin(&server_id, &user.user_id).await {
+        Ok(is_owner_or_admin) => is_owner_or_admin,
+        Err(e) => return Err(internal_error(e, "Failed to check server membership")),
+    };
 
     if !is_owner_or_admin {
         return Err((
@@ -299,16 +256,10 @@ async fn create_channel(
     }
 
     let channels = ChannelRepository::new(&state.db);
-    let channel_id = channels
-        .create_channel(&server_id, &request.name)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to create channel");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let channel_id = match channels.create_channel(&server_id, &request.name).await {
+        Ok(channel_id) => channel_id,
+        Err(e) => return Err(internal_error(e, "Failed to create channel")),
+    };
 
     Ok(Json(ChannelResponse {
         id: channel_id.0,
@@ -724,5 +675,180 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[sqlx::test]
+    async fn delete_server_returns_401_for_unauthenticated(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state);
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/servers/{}", Uuid::new_v4()))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn list_channels_returns_401_for_unauthenticated(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/servers/{}/channels", Uuid::new_v4()))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn create_channel_returns_401_for_unauthenticated(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/servers/{}/channels", Uuid::new_v4()))
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"name": "test"}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn list_servers_returns_bad_request_when_lookup_fails(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = list_servers(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
+    }
+
+    #[sqlx::test]
+    async fn create_server_returns_bad_request_when_insert_fails(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = create_server(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+            Json(CreateServerRequest {
+                name: "failing server".to_string(),
+            }),
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
+    }
+
+    #[sqlx::test]
+    async fn delete_server_returns_bad_request_when_ownership_check_fails(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = delete_server(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+            Path(Uuid::new_v4()),
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
+    }
+
+    #[sqlx::test]
+    async fn list_channels_returns_bad_request_when_membership_check_fails(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = list_channels(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+            Path(Uuid::new_v4()),
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
+    }
+
+    #[sqlx::test]
+    async fn create_channel_returns_bad_request_when_membership_check_fails(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = create_channel(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+            Path(Uuid::new_v4()),
+            Json(CreateChannelRequest {
+                name: "test".to_string(),
+            }),
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
     }
 }

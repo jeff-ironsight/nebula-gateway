@@ -99,6 +99,15 @@ mod tests {
         })
     }
 
+    fn real_auth0() -> Auth0Verifier {
+        Auth0Verifier::new(Auth0Settings {
+            issuer: "https://test-issuer/".into(),
+            audience: "test-audience".into(),
+            jwks_url: "https://example.invalid/.well-known/jwks.json".into(),
+            jwks_cache_ttl: Duration::from_secs(60),
+        })
+    }
+
     // Simple handler that requires authentication
     async fn protected_handler(user: AuthenticatedUser) -> Json<Value> {
         Json(serde_json::json!({ "user_id": user.user_id.0.to_string() }))
@@ -178,6 +187,55 @@ mod tests {
             .unwrap();
         let error: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(error["error"], "Auth not configured");
+    }
+
+    #[sqlx::test]
+    async fn authenticated_user_returns_401_for_invalid_token(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(real_auth0())));
+        let app = test_router(state);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/protected")
+            .header("Authorization", "Bearer not-a-jwt")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            error["error"]
+                .as_str()
+                .is_some_and(|e| e.starts_with("Token verification failed:"))
+        );
+    }
+
+    #[sqlx::test]
+    async fn authenticated_user_returns_401_when_user_lookup_fails(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+        let app = test_router(state);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/protected")
+            .header("Authorization", format!("Bearer {}", Uuid::new_v4()))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
     }
 
     #[sqlx::test]

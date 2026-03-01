@@ -65,6 +65,14 @@ impl IntoResponse for ApiError {
     }
 }
 
+fn internal_error(error: impl std::fmt::Display, context: &str) -> Response {
+    tracing::error!(error = %error, context, "Internal error");
+    ApiError {
+        error: "Internal error".to_string(),
+    }
+    .into_response()
+}
+
 async fn build_server_response(
     state: &AppState,
     server_id: &ServerId,
@@ -73,16 +81,10 @@ async fn build_server_response(
     let servers = ServerRepository::new(&state.db);
     let channels = ChannelRepository::new(&state.db);
 
-    let server = servers
-        .get_server_for_user(server_id, user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to get server");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let server = match servers.get_server_for_user(server_id, user_id).await {
+        Ok(server) => server,
+        Err(e) => return Err(internal_error(e, "Failed to get server")),
+    };
 
     let Some(server) = server else {
         return Err((
@@ -94,16 +96,10 @@ async fn build_server_response(
             .into_response());
     };
 
-    let server_channels = channels
-        .get_channels_for_server(server_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to list channels for server");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let server_channels = match channels.get_channels_for_server(server_id).await {
+        Ok(server_channels) => server_channels,
+        Err(e) => return Err(internal_error(e, "Failed to list channels for server")),
+    };
 
     Ok(ServerResponse {
         id: server.id.0,
@@ -132,16 +128,10 @@ async fn create_invite(
 
     // Verify user is member of server
     let servers = ServerRepository::new(&state.db);
-    let is_member = servers
-        .is_member(&server_id, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to check server membership");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let is_member = match servers.is_member(&server_id, &user.user_id).await {
+        Ok(is_member) => is_member,
+        Err(e) => return Err(internal_error(e, "Failed to check server membership")),
+    };
 
     if !is_member {
         return Err((
@@ -158,16 +148,13 @@ async fn create_invite(
         .map(|hours| Utc::now() + Duration::hours(hours));
 
     let invites = InviteRepository::new(&state.db);
-    let invite = invites
+    let invite = match invites
         .create(&server_id, &user.user_id, request.max_uses, expires_at)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to create invite");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    {
+        Ok(invite) => invite,
+        Err(e) => return Err(internal_error(e, "Failed to create invite")),
+    };
 
     Ok(Json(InviteResponse {
         code: invite.code.0,
@@ -184,13 +171,10 @@ async fn preview_invite(
     Path(code): Path<String>,
 ) -> Result<Json<InvitePreviewResponse>, Response> {
     let invites = InviteRepository::new(&state.db);
-    let preview = invites.get_preview(&code).await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to get invite preview");
-        ApiError {
-            error: "Internal error".to_string(),
-        }
-        .into_response()
-    })?;
+    let preview = match invites.get_preview(&code).await {
+        Ok(preview) => preview,
+        Err(e) => return Err(internal_error(e, "Failed to get invite preview")),
+    };
 
     let Some(preview) = preview else {
         return Err((
@@ -218,13 +202,10 @@ async fn use_invite(
     let invites = InviteRepository::new(&state.db);
     let servers = ServerRepository::new(&state.db);
 
-    let server_id = invites.get_server_id_for_invite(&code).await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to get server for invite");
-        ApiError {
-            error: "Internal error".to_string(),
-        }
-        .into_response()
-    })?;
+    let server_id = match invites.get_server_id_for_invite(&code).await {
+        Ok(server_id) => server_id,
+        Err(e) => return Err(internal_error(e, "Failed to get server for invite")),
+    };
 
     let Some(server_id) = server_id else {
         return Err((
@@ -236,27 +217,15 @@ async fn use_invite(
             .into_response());
     };
 
-    let was_already_member = servers
-        .is_member(&server_id, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to check membership");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let was_already_member = match servers.is_member(&server_id, &user.user_id).await {
+        Ok(was_already_member) => was_already_member,
+        Err(e) => return Err(internal_error(e, "Failed to check membership")),
+    };
 
-    let result = invites
-        .use_invite(&code, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to use invite");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let result = match invites.use_invite(&code, &user.user_id).await {
+        Ok(result) => result,
+        Err(e) => return Err(internal_error(e, "Failed to use invite")),
+    };
 
     let Some(joined_server_id) = result else {
         return Err((
@@ -295,13 +264,10 @@ async fn revoke_invite(
     let servers = ServerRepository::new(&state.db);
 
     // Get the server for this invite to check permissions
-    let server_id = invites.get_server_id_for_invite(&code).await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to get server for invite");
-        ApiError {
-            error: "Internal error".to_string(),
-        }
-        .into_response()
-    })?;
+    let server_id = match invites.get_server_id_for_invite(&code).await {
+        Ok(server_id) => server_id,
+        Err(e) => return Err(internal_error(e, "Failed to get server for invite")),
+    };
 
     let Some(server_id) = server_id else {
         return Err((
@@ -314,27 +280,15 @@ async fn revoke_invite(
     };
 
     // User must be the creator OR an admin/owner of the server
-    let is_creator = invites
-        .is_creator(&code, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to check invite creator");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let is_creator = match invites.is_creator(&code, &user.user_id).await {
+        Ok(is_creator) => is_creator,
+        Err(e) => return Err(internal_error(e, "Failed to check invite creator")),
+    };
 
-    let is_admin = servers
-        .is_owner_or_admin(&server_id, &user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to check server admin status");
-            ApiError {
-                error: "Internal error".to_string(),
-            }
-            .into_response()
-        })?;
+    let is_admin = match servers.is_owner_or_admin(&server_id, &user.user_id).await {
+        Ok(is_admin) => is_admin,
+        Err(e) => return Err(internal_error(e, "Failed to check server admin status")),
+    };
 
     if !is_creator && !is_admin {
         return Err((
@@ -346,13 +300,10 @@ async fn revoke_invite(
             .into_response());
     }
 
-    invites.delete(&code).await.map_err(|e| {
-        tracing::error!(error = %e, "Failed to delete invite");
-        ApiError {
-            error: "Internal error".to_string(),
-        }
-        .into_response()
-    })?;
+    match invites.delete(&code).await {
+        Ok(_) => {}
+        Err(e) => return Err(internal_error(e, "Failed to delete invite")),
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -904,5 +855,178 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[sqlx::test]
+    async fn revoke_invite_allows_creator_when_not_admin(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state.clone());
+
+        let owner_sub = format!("auth0|revoke-cr-owner-{}", Uuid::new_v4());
+        let creator_sub = format!("auth0|revoke-cr-creator-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let owner_id = users.get_or_create_by_auth_sub(&owner_sub).await.unwrap();
+        let creator_id = users.get_or_create_by_auth_sub(&creator_sub).await.unwrap();
+
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("Creator Revoke Server", &owner_id)
+            .await
+            .unwrap();
+        // Creator is a regular member (not admin)
+        servers
+            .add_member(&server_id, &creator_id, "member")
+            .await
+            .unwrap();
+
+        let invites = InviteRepository::new(&state.db);
+        let invite = invites
+            .create(&server_id, &creator_id, None, None)
+            .await
+            .unwrap();
+
+        // Creator revokes their own invite (is_creator=true, is_admin=false)
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/invites/{}", invite.code.0))
+            .header("Authorization", format!("Bearer {creator_sub}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[sqlx::test]
+    async fn revoke_invite_returns_401_for_unauthenticated(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let app = router().with_state(state);
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/invites/{}", Uuid::new_v4()))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn create_invite_returns_bad_request_when_membership_check_fails(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = create_invite(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+            Path(Uuid::new_v4()),
+            Json(CreateInviteRequest {
+                max_uses: None,
+                expires_in_hours: None,
+            }),
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
+    }
+
+    #[sqlx::test]
+    async fn preview_invite_returns_bad_request_on_repository_failure(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = preview_invite(State(state), Path("ABC12345".to_string())).await else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
+    }
+
+    #[sqlx::test]
+    async fn use_invite_returns_bad_request_on_server_lookup_failure(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = use_invite(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+            Path("ABC12345".to_string()),
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
+    }
+
+    #[sqlx::test]
+    async fn revoke_invite_returns_bad_request_on_server_lookup_failure(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        state.db.close().await;
+
+        let Err(response) = revoke_invite(
+            State(state),
+            AuthenticatedUser {
+                user_id: crate::types::UserId(Uuid::new_v4()),
+            },
+            Path("ABC12345".to_string()),
+        )
+        .await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Internal error");
+    }
+
+    #[sqlx::test]
+    async fn build_server_response_returns_404_when_server_missing(pool: sqlx::PgPool) {
+        let state = AppState::new(pool, Some(test_auth0()));
+
+        let auth_sub = format!("auth0|missing-server-user-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let user_id = users.get_or_create_by_auth_sub(&auth_sub).await.unwrap();
+
+        let missing_server_id = ServerId::from(Uuid::new_v4());
+        let Err(response) = build_server_response(&state, &missing_server_id, &user_id).await
+        else {
+            panic!("expected error response");
+        };
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "Server not found");
     }
 }

@@ -264,7 +264,7 @@ mod tests {
     use crate::{
         app,
         auth0::{Auth0Settings, Auth0Verifier},
-        data::{ChannelRepository, ServerRepository},
+        data::{ChannelRepository, ServerRepository, UserRepository},
         gateway::handler::{
             broadcast_message_to_channel, cleanup_connection, subscribe_to_channel,
         },
@@ -964,6 +964,175 @@ mod tests {
             false,
         )
         .await;
+
+        socket.close(None).await.unwrap();
+        server.abort();
+    }
+
+    #[sqlx::test]
+    async fn identify_fails_for_invalid_token(pool: sqlx::PgPool) {
+        // With no auth0 configured, resolve_user returns None → InvalidToken error
+        let state = Arc::new(AppState::new(pool, None));
+        let router = app::build_router(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        let url = format!("ws://{addr}/ws");
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        socket.next().await.unwrap().unwrap(); // Hello
+
+        let identify = to_string(&GatewayPayload::Identify {
+            token: Token("any-token".into()),
+        })
+        .unwrap();
+        socket
+            .send(tungstenite::Message::Text(identify.into()))
+            .await
+            .unwrap();
+
+        expect_error_dispatch(&mut socket, ErrorCode::InvalidToken).await;
+
+        socket.close(None).await.unwrap();
+        server.abort();
+    }
+
+    #[sqlx::test]
+    async fn invalid_json_is_ignored(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
+        let router = app::build_router(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        let url = format!("ws://{addr}/ws");
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        socket.next().await.unwrap().unwrap(); // Hello
+
+        // Send invalid JSON — connection should stay alive
+        socket
+            .send(tungstenite::Message::Text("not valid json }{{{".into()))
+            .await
+            .unwrap();
+
+        // Give the server a moment to process the bad message
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(state.connections.len(), 1);
+
+        socket.close(None).await.unwrap();
+        server.abort();
+    }
+
+    #[sqlx::test]
+    async fn unhandled_payload_is_ignored(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, None));
+        let router = app::build_router(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        let url = format!("ws://{addr}/ws");
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        socket.next().await.unwrap().unwrap(); // Hello
+
+        // Send a Hello payload from the client side — hits Ok(_other) arm, connection stays alive
+        let hello = to_string(&GatewayPayload::Hello {
+            heartbeat_interval_ms: 25_000,
+        })
+        .unwrap();
+        socket
+            .send(tungstenite::Message::Text(hello.into()))
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(state.connections.len(), 1);
+
+        socket.close(None).await.unwrap();
+        server.abort();
+    }
+
+    #[sqlx::test]
+    async fn message_create_rejected_when_username_not_set(pool: sqlx::PgPool) {
+        let state = Arc::new(AppState::new(pool, Some(test_auth0())));
+        let router = app::build_router(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        let url = format!("ws://{addr}/ws");
+        let (mut socket, _) = connect_async(&url).await.unwrap();
+        socket.next().await.unwrap().unwrap(); // Hello
+
+        // Create user without a username (get_or_create_by_auth_sub uses NULL for username)
+        let user_sub = format!("auth0|no-username-{}", Uuid::new_v4());
+        let users = UserRepository::new(&state.db);
+        let user_id = users.get_or_create_by_auth_sub(&user_sub).await.unwrap();
+
+        // Create a server and channel to subscribe to
+        let servers = ServerRepository::new(&state.db);
+        let server_id = servers
+            .create_server("No Username Server", &user_id)
+            .await
+            .unwrap();
+        let channel_repo = ChannelRepository::new(&state.db);
+        let server_channels = channel_repo
+            .get_channels_for_server(&server_id)
+            .await
+            .unwrap();
+        let channel_id = server_channels[0].id;
+
+        // Identify — username is "" in the READY event (NULL in DB → unwrap_or_default)
+        let identify = to_string(&GatewayPayload::Identify {
+            token: Token(user_sub.clone()),
+        })
+        .unwrap();
+        socket
+            .send(tungstenite::Message::Text(identify.into()))
+            .await
+            .unwrap();
+        socket.next().await.unwrap().unwrap(); // READY
+
+        // Subscribe
+        let subscribe = r#"{"op":"Subscribe","d":{}}"#;
+        socket
+            .send(tungstenite::Message::Text(subscribe.into()))
+            .await
+            .unwrap();
+        socket.next().await.unwrap().unwrap(); // SUBSCRIBED
+
+        // Wait for subscription to be registered
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if state.channel_subscribers.get(&channel_id).is_some() {
+                    break;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        // Try to send a message — rejected since username is NULL in DB
+        let message = to_string(&GatewayPayload::MessageCreate {
+            channel_id,
+            content: "hello".into(),
+        })
+        .unwrap();
+        socket
+            .send(tungstenite::Message::Text(message.into()))
+            .await
+            .unwrap();
+
+        expect_error_dispatch(&mut socket, ErrorCode::UsernameRequired).await;
 
         socket.close(None).await.unwrap();
         server.abort();
