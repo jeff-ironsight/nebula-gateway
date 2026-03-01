@@ -71,9 +71,10 @@ jobs:
 
       - name: Upload test results
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.rust == 'stable' }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v5
         with:
           files: target/nextest/ci/junit.xml
+          report_type: test_results
           token: ${{ secrets.CODECOV_TOKEN }}
 
       # Enforce formatting
@@ -91,9 +92,8 @@ jobs:
         run: cargo llvm-cov --workspace --all-features --ignore-filename-regex "$COVERAGE_IGNORE_REGEX" --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: lcov.info
           fail_ci_if_error: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }}
