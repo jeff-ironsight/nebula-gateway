@@ -95,7 +95,7 @@ mod tests {
             issuer: "https://test-issuer/".into(),
             audience: "test-audience".into(),
             jwks_url: "https://example.invalid/.well-known/jwks.json".into(),
-            jwks_cache_ttl: Duration::from_secs(60),
+            jwks_cache_ttl: Duration::from_mins(1),
         })
     }
 
@@ -104,7 +104,7 @@ mod tests {
             issuer: "https://test-issuer/".into(),
             audience: "test-audience".into(),
             jwks_url: "https://example.invalid/.well-known/jwks.json".into(),
-            jwks_cache_ttl: Duration::from_secs(60),
+            jwks_cache_ttl: Duration::from_mins(1),
         })
     }
 

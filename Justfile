@@ -55,6 +55,7 @@ dev:
 	cargo install cargo-nextest --locked
 	cargo install sqlx-cli --locked --no-default-features --features postgres
 	brew install gnuplot
+	just docker
 
 # Run tests. Each test gets an isolated database via #[sqlx::test] (requires DATABASE_URL).
 [group('TEST')]

@@ -241,7 +241,7 @@ mod tests {
             issuer: "https://issuer.example/".to_string(),
             audience: "https://audience.example".to_string(),
             jwks_url: jwks_url.to_string(),
-            jwks_cache_ttl: Duration::from_secs(60),
+            jwks_cache_ttl: Duration::from_mins(1),
         }
     }
 
